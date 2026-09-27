@@ -1,8 +1,8 @@
 # 个人 Wiki / Personal Wiki
 
-独立项目，已完成首版 nashsu 本机安装与 X、微信样本编译验证，正在进行集成落地。
+独立项目；本机已部署 Personal Wiki 0.3.0-preview.2，提供名词解释、全文中文阅读、图片/公开 X 视频下载及忠实 Markdown 整理。
 
-2026-09-27 安装结果：nashsu 0.6.11＋Codex CLI 已在独立 Vault 中生成两份样本的来源卡、概念和实体。见[运行说明](docs/nashsu-local.md)及[实测报告](docs/research/nashsu-install-test-2026-09-27.md)。飞书记录插件 0.2.0 已安装，真实飞书端到端验收仍待完成，完整规格见 [Issue #1](https://github.com/liunoly-design/Personal_wiki/issues/1)。
+2026-09-27 安装结果：nashsu 0.6.11＋Codex CLI 已在独立 Vault 中生成两份样本的来源卡、概念和实体。见[运行说明](docs/nashsu-local.md)及[实测报告](docs/research/nashsu-install-test-2026-09-27.md)。飞书记录插件已更新至 0.3.0-preview.2，299 份旧名词页已更新；见[本次部署与验证](docs/research/deploy-2026-09-28.md)。新版真实飞书入站验收仍待用户测试，完整规格见 [Issue #1](https://github.com/liunoly-design/Personal_wiki/issues/1)。
 
 可用入口和验收范围见[当前用例清单](docs/current-capabilities.md)。
 
