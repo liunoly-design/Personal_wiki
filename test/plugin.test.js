@@ -10,8 +10,22 @@ test('hook reserves query, ignores GTD and unauthorized sender, does not process
  assert.equal(await hook({ctx:{...message,rawText:'小婕 GTD 收集：买菜'},sendPolicy:'allow'},ctx),undefined);
  assert.equal(await hook({ctx:{...message,SenderId:'ou_other'},sendPolicy:'allow'},ctx),undefined);
  await hook({ctx:{...message,rawText:'小婕 wk 查询：Canvas'},sendPolicy:'allow'},ctx);assert.match(replies[0],/暂未开放/);assert.equal(calls,0);
+ await hook({ctx:{...message,rawText:'小婕 wk 讨论：Canvas'},sendPolicy:'allow'},ctx);assert.match(replies.at(-1),/暂未开放/);assert.equal(calls,0);
  await hook({ctx:message,sendPolicy:'deny'},ctx);assert.equal(calls,0);
  await hook({ctx:message,sendPolicy:'allow'},ctx);assert.equal(calls,1);assert.match(replies.at(-1),/收到/);
+});
+
+test('failed processing produces one failure receipt and duplicate delivery does not rerun work',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'wk-failure-'));let attempts=0;const sent=[];
+ const config={...scope,stateDir:join(dir,'state'),vault:join(dir,'vault'),python:'/usr/bin/python3'};
+ const original={message_id:'om_test',chat_id:'oc_test',sender:{id:'ou_test',id_type:'open_id',sender_type:'user'},body:{content:JSON.stringify({text:message.rawText})}};
+ const runtime=await openRuntime({config,hostConfig:{},flash:{},feishu:{getMessage:async()=>original,reply:async r=>{sent.push(r);return{message_id:'om_failure',chat_id:'oc_test'};}},
+  makeAdapters:()=>({capture:async()=>{attempts++;throw Error('synthetic network failure');}})});
+ try{
+  await runtime.accept(message,'https://x.com/a/status/123');await runtime.processJobs();
+  assert.equal((await runtime.accept(message,'https://x.com/a/status/123')).duplicate,true);await runtime.processJobs();
+  assert.equal(attempts,1);assert.equal(sent.length,1);assert.match(sent[0].text,/未全部完成/);assert.doesNotMatch(sent[0].text,/synthetic network failure/);
+ }finally{await runtime.close();await rm(dir,{recursive:true,force:true});}
 });
 test('durable job verifies original message, runs once and replies to the same chat',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'wk-plugin-'));const config={...scope,stateDir:join(dir,'state'),vault:join(dir,'vault'),python:'/usr/bin/python3'};let runs=0,sent=0;

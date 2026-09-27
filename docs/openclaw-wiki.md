@@ -10,7 +10,7 @@ node "/Users/mac/Documents/personal_OS/Personal-Wiki/scripts/install-openclaw.mj
 
 安装器创建 Python 虚拟环境、安装抓取依赖、备份 OpenClaw 配置、链接本项目、复用现有小婕的飞书用户及会话白名单，然后重启 Gateway。先打开 LLM Wiki.app 的 Personal-Wiki-Vault。可加 `--check` 只检查前置条件。
 
-目前已验证隔离配置加载和安装前检查，尚未执行实际 Gateway 安装，也未发送真实飞书测试消息。
+2026-09-27 已安装到实际 Gateway，personal-wiki 0.2.0 与原 personal-gtd 0.1.0 均加载，飞书连接正常；真实飞书端到端测试等待用户发送指定消息。详见 [安装验收记录](research/openclaw-install-2026-09-27.md)。
 
 ## 指令
 

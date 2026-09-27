@@ -27,4 +27,4 @@
 
 ## 飞书 Wiki 插件
 
-已实现 `小婕 wk 记录：链接` 的本地插件；先用 Gemini Flash 保存名词基础解释，再交给 nashsu 分析文章关联。安装命令、模型费用和当前限制见 [飞书 Wiki 入口](docs/openclaw-wiki.md)。查询与讨论暂时预留，真实飞书部署尚待运行安装命令。
+已安装 `小婕 wk 记录：链接` 插件到本机 OpenClaw；先用 Gemini Flash 保存名词基础解释，再交给 nashsu 分析文章关联。安装命令、模型费用和当前限制见 [飞书 Wiki 入口](docs/openclaw-wiki.md)。查询与讨论暂时预留。安装与本地检查通过，真实飞书端到端验收仍待用户发送测试消息，见 [安装记录](docs/research/openclaw-install-2026-09-27.md)。

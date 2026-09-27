@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,rm,mkdir,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {parseCommand,recordArticle} from '../src/wk.js';
@@ -32,4 +32,16 @@ test('Flash failure retains capture and never starts article compilation',async(
 test('existing URL returns before capture or paid Flash calls',async()=>{
  const result=await recordArticle({url:'https://x.com/a/status/1',vault:'/unused'},{lookupExisting:async()=>({status:'existing',source:'saved.md'}),capture:async()=>assert.fail('must not recapture'),extract:async()=>assert.fail('must not call Flash')});
  assert.equal(result.status,'existing');assert.equal(result.newDefinitions,0);
+});
+
+test('existing foundation remains byte-identical and is available before compilation',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wk-foundation-'));
+ try{
+  await mkdir(join(root,'glossary'));const file=join(root,'glossary/canvas.md');const original='User-maintained foundation\n保留此段\n';await writeFile(file,original);
+  const result=await recordArticle({url:'https://x.com/a/status/123',vault:root},{
+   capture:async()=>({directory:'/synthetic',text:'Canvas'}),extract:async()=>({slug:'sample',terms:[{name:'Canvas',slug:'canvas'}]}),
+   explain:async()=>assert.fail('existing foundation must not be regenerated'),
+   importAndCompile:async({context})=>{assert.equal(await readFile(file,'utf8'),original);assert.ok(context.includes(original));return{status:'complete',source:'sample.md'};},
+  });assert.equal(result.newDefinitions,0);assert.equal(await readFile(file,'utf8'),original);
+ }finally{await rm(root,{recursive:true,force:true});}
 });
