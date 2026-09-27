@@ -44,7 +44,7 @@ export function createAdapters({vault,python,captureDirectory,flash,refresh=fals
    const normalized=new URL(url);if(['x.com','twitter.com'].includes(normalized.hostname)){normalized.hostname='x.com';normalized.search='';normalized.pathname=normalized.pathname.replace(/\/$/u,'');}normalized.hash='';
    const record=await store({operation:'archive',vault,snapshot:capture.directory,slug,url:normalized.href,refresh},{python,signal});
    await onStage('archived',{sourceId:record.id,archive:record.archive});
-   const compiled=await compileArchive({vault,record,context,generate,python,signal,onStage});
+   const compiled=await compileArchive({vault,record,context,generate,explain:flash.explain,python,signal,onStage});
    await onStage('compiled',{compilation:compiled});
    if(!reading)return compiled;
    await onStage('translating',{reading:{status:'processing'}});

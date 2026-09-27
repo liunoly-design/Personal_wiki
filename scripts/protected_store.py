@@ -287,13 +287,63 @@ def publish_reading(root, request):
     return result
 
 
+def refresh_terms(root, request):
+    if not re.fullmatch('[a-f0-9]{20}', request['runId']):
+        raise ValueError('Invalid regeneration ID')
+    backup = f".personal-wiki/term-refresh/{request['runId']}/before"
+    updated, conflicts = 0, []
+    for change in request['changes']:
+        path = change['path']
+        if not re.fullmatch(r'(?:glossary|wiki/(?:entities|concepts))/[^/]+\.md', path):
+            raise ValueError('Regeneration only accepts term pages')
+        current = root.read(path)
+        candidate = change['content'].encode()
+        if current == candidate:
+            updated += 1
+            continue
+        if sha(current) != change['expectedHash']:
+            conflicts.append(path)
+            continue
+        root.immutable(backup + '/' + path, current)
+        # The user explicitly requested replacement of generated explanations.
+        # Stage privately, recheck the source, and preserve the full previous bytes.
+        staging = f".personal-wiki/term-refresh/{request['runId']}/after/{path}"
+        root.immutable(staging, candidate)
+        if root.read(path) != current:
+            conflicts.append(path)
+            continue
+        srcfd, srcname = root.parent(staging)
+        dstfd, dstname = root.parent(path)
+        temp = '.refresh-' + uuid4().hex
+        try:
+            os.link(srcname, temp, src_dir_fd=srcfd, dst_dir_fd=dstfd)
+            if root.read(path) != current:
+                conflicts.append(path)
+                continue
+            os.replace(temp, dstname, src_dir_fd=dstfd, dst_dir_fd=dstfd)
+            os.fsync(dstfd)
+            updated += 1
+        finally:
+            try:
+                os.unlink(temp, dir_fd=dstfd)
+            except FileNotFoundError:
+                pass
+            os.close(srcfd)
+            os.close(dstfd)
+    result = dict(updated=updated, conflicts=conflicts, backup=str(root.path / backup))
+    root.put(f".personal-wiki/term-refresh/{request['runId']}/result.json", encode(result), replace=True)
+    return result
+
+
 if __name__ == '__main__':
     request = json.load(sys.stdin)
     root = Root(request['vault'])
     lock = root.lock()
     try:
         operation = request['operation']
-        if operation == 'archive':
+        if operation == 'refresh-terms':
+            result = refresh_terms(root, request)
+        elif operation == 'archive':
             result = archive(root, request)
         elif operation in ('verify', 'reading-unit'):
             record = json.loads(root.read(f".personal-wiki/{request['sourceId']}.json"))

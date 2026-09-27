@@ -15,7 +15,7 @@ export function store(request,{python='python3',signal}={}){
  });
 }
 async function optional(path){try{return await readFile(path,'utf8');}catch(e){if(e.code==='ENOENT')return '';throw e;}}
-export async function compileArchive({vault,record,context='',generate,python,signal,onStage=async()=>{}}){
+export async function compileArchive({vault,record,context='',generate,explain,python,signal,onStage=async()=>{}}){
  const directory=join(vault,'.personal-wiki/compilations',record.id);
  const saved=await optional(join(directory,'generation.json'));
  if(saved)return store(JSON.parse(saved),{python,signal});
@@ -32,6 +32,22 @@ export async function compileArchive({vault,record,context='',generate,python,si
  // The desktop normally handles log updates itself; its append-only log output
  // is not a knowledge page. Our commit journal records the actual operation.
  const blocks=parsed.blocks.filter(b=>b.path!=='wiki/log.md');
+ const knowledge=blocks.filter(b=>/^wiki\/(entities|concepts)\//u.test(b.path));
+ if(explain&&knowledge.length){
+  for(let start=0;start<knowledge.length;start+=6){
+   const batch=knowledge.slice(start,start+6);
+   const terms=batch.map((b,i)=>({slug:'definition-'+(start+i),name:b.content.match(/^#\s+(.+)$/mu)?.[1]??b.path.split('/').at(-1).replace(/\.md$/u,''),domain:'文章语境仅用于消歧：'+b.content.slice(0,1200)}));
+   const values=await explain(terms,signal);
+   for(let i=0;i<batch.length;i++){
+    const matching=Array.isArray(values)?values.filter(d=>d.slug===terms[i].slug):[];
+    if(matching.length!==1||!['definition','example','uncertainty'].every(k=>typeof matching[0][k]==='string'&&matching[0][k].trim()))throw Error('Incomplete knowledge definitions; original archived');
+    const d=matching[0],section=`\n\n## 是什么\n\n${d.definition}\n\n## 简单例子\n\n${d.example}\n\n## 歧义与核实状态\n\n${d.uncertainty}\n\n> 基础说明由模型生成，未经独立核实；下文是文章观点及证据。\n\n## 文章中的用法与来源\n`;
+    if(!/^# /mu.test(batch[i].content))throw Error('Knowledge page is missing title');
+    batch[i].content=batch[i].content.replace(/^(# .+)$/mu,(_,heading)=>heading+section);
+   }
+  }
+ }
+
  await onStage('committing',{sourceId:record.id});
  return store({operation:'commit',vault,sourceId:record.id,blocks,generation},{python,signal});
 }

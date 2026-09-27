@@ -62,7 +62,9 @@ export async function buildChineseReading({vault,record,translate,python,signal}
  try{return JSON.parse(await readFile(join(cache,'result.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
  const original=await readFile(join(record.archive,'article.md'),'utf8');
  const content=[];
- for(const unit of units(original)){
+ // Extraction metadata stays in the immutable original, not in translated prose.
+ const body=original.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u,'');
+ for(const unit of units(body)){
   signal?.throwIfAborted();
   if(unit.literal!==undefined){content.push(unit.literal);continue;}
   const latin=(unit.text.match(/[A-Za-z]/gu)??[]).length,han=(unit.text.match(/\p{Script=Han}/gu)??[]).length;

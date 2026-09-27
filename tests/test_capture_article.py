@@ -24,3 +24,26 @@ class TargetTest(unittest.TestCase):
     def test_unknown_target_fails(self):
         with self.assertRaises(ValueError):
             select_target_article(BeautifulSoup('<article>unidentified</article>','html.parser'),'https://x.com/a/status/1')
+
+class CaptureMediaTest(unittest.TestCase):
+ def test_x_image_and_video_capture_produces_local_markdown_links(self):
+  import tempfile, subprocess, json
+  from pathlib import Path
+  from unittest.mock import patch
+  import imageio_ffmpeg
+  from scripts.capture_article import capture
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp);sample=root/'sample.mp4'
+   subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-y','-f','lavfi','-i','color=c=black:s=160x90:d=0.1','-c:v','libx264',str(sample)],check=True,capture_output=True)
+   html='<article><a href="/a/status/123">Post</a><p>Media sample</p><img src="https://pbs.twimg.com/sample.jpg"><video src="https://video.twimg.com/sample.mp4"></video></article>'
+   def request(url,hosts,limit,dest):
+    if url.startswith('https://x.com'):dest.write_text(html)
+    elif 'pbs.twimg.com' in url:dest.write_bytes(b'synthetic image')
+    else:dest.write_bytes(sample.read_bytes())
+   info={'duration':0.1,'formats':[{'url':'https://video.twimg.com/sample.mp4','ext':'mp4','width':160,'height':90,'vcodec':'h264','protocol':'https'}]}
+   with patch('scripts.capture_article.request',side_effect=request),patch('scripts.capture_article.extract_public',return_value=info):
+    result=capture('https://x.com/a/status/123',root/'capture')
+   self.assertEqual(result['status'],'complete')
+   body=(Path(result['directory'])/'article.md').read_text()
+   self.assertIn('images/image-01.jpg',body);self.assertIn('videos/video-01.mp4',body)
+   self.assertEqual((Path(result['directory'])/'videos/video-01.mp4').read_bytes(),sample.read_bytes())

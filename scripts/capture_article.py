@@ -11,6 +11,10 @@ from urllib.parse import urlsplit
 import httpx
 from bs4 import BeautifulSoup
 from markdownify import markdownify
+try:
+    from .media_download import extract_public, video_assets
+except ImportError:
+    from media_download import extract_public, video_assets
 
 
 def request(url, hosts, limit, dest):
@@ -92,13 +96,33 @@ def capture(url, output):
         # unless every declared local image exists.
         images=metadata.get('images',[])+[metadata.get('cover_image'),metadata.get('share_cover_image')]
         missing=[x for x in images if x and (not x.get('local_path') or not (directory/x['local_path']).is_file())]
-        result={'directory':str(directory.resolve()),'status':'partial' if missing else 'complete'}
+        html='\n'.join(p.read_text(errors='replace') for p in directory.glob('*.html'))
+        video_pending=bool(metadata.get('videos')) or any(marker in html for marker in ['<video', 'vid=', 'iframe class="video'])
+        result={'directory':str(directory.resolve()),'status':'partial' if missing or video_pending else 'complete','video_status':'waiting_for_supported_download' if video_pending else 'not_detected'}
     elif host in ['x.com','twitter.com']:
         directory=out/'package';directory.mkdir(exist_ok=True)
-        raw=directory/'raw.html';request(url,{'x.com','www.x.com','twitter.com','www.twitter.com'},8*1024*1024,raw)
-        soup=BeautifulSoup(raw.read_text(),'html.parser');articles=soup.select('article')
-        if not articles:raise ValueError('X article unavailable; login or another parser is required')
-        article=select_target_article(soup,url)
+        raw=directory/'raw.html'
+        media_info=None
+        try:
+            request(url,{'x.com','www.x.com','twitter.com','www.twitter.com'},8*1024*1024,raw)
+            soup=BeautifulSoup(raw.read_text(),'html.parser')
+            article=select_target_article(soup,url)
+        except (ValueError, httpx.HTTPError):
+            media_info=extract_public(url)
+            (directory/'extractor.json').write_text(json.dumps(media_info,ensure_ascii=False,indent=2))
+            description=media_info.get('description')
+            if not description:
+                description=next((e.get('description') for e in media_info.get('entries',[]) if e.get('description')),None)
+            if not description:raise ValueError('X text unavailable; retained metadata only')
+            soup=BeautifulSoup('<article></article>','html.parser');article=soup.article
+            paragraph=soup.new_tag('p');paragraph.string=description;article.append(paragraph)
+        has_video=bool(article.select('video')) or media_info is not None
+        if has_video and media_info is None:
+            try:
+                media_info=extract_public(url)
+                (directory/'extractor.json').write_text(json.dumps(media_info,ensure_ascii=False,indent=2))
+            except (ValueError, subprocess.TimeoutExpired):
+                pass
         for n in article.select('button,nav,script,style'):n.decompose()
         assets=[]
         for n in list(article.select('img')):
@@ -106,12 +130,14 @@ def capture(url, output):
             if '/profile_images/' in u:n.decompose();continue
             rel='images/image-%02d%s'%(len(assets)+1,'.webp' if 'format=webp' in u else '.jpg')
             assets.append({'url':u,'path':rel,'kind':'image'});n['src']=rel
-        for i,n in enumerate(list(article.select('video'))):
-            u=n.get('src') or (n.find('source') or {}).get('src')
-            if not u:continue
-            rel='videos/video-%02d.mp4'%(i+1);assets.append({'url':u,'path':rel,'kind':'video'})
-            a=soup.new_tag('a',href=rel);a.string='视频 %d（不转录）'%(i+1);n.replace_with(a)
+        for node in list(article.select('video')):node.decompose()
+        videos=video_assets(media_info) if media_info else ([{'kind':'video','status':'waiting','error':'Public video metadata unavailable'}] if has_video else [])
+        for i,item in enumerate(videos):
+            item['path']='videos/video-%02d.mp4'%(i+1)
+            assets.append(item)
+            anchor=soup.new_tag('a',href=item.get('url',url));anchor.string='视频 %d（不转录）'%(i+1);article.append(anchor)
         for a in assets:
+            if a.get('status')=='waiting':continue
             dest=directory/a['path'];dest.parent.mkdir(exist_ok=True);temp=dest.with_suffix(dest.suffix+'.part')
             try:
                 request(a['url'],{'pbs.twimg.com','video.twimg.com'},1000000000 if a['kind']=='video' else 30000000,temp)
@@ -124,12 +150,15 @@ def capture(url, output):
                     seconds=int(duration[1])*3600+int(duration[2])*60+float(duration[3])
                     if seconds>1800 or min(int(size[1]),int(size[2]))>1080:raise ValueError('Video exceeds duration/resolution limit; awaiting handling')
                 temp.rename(dest);a['status']='downloaded'
+                if a['kind']=='video':
+                    for anchor in article.select('a[href]'):
+                        if anchor['href']==a['url']:anchor['href']=a['path']
             except Exception:
                 a['status']='failed_or_waiting';a['error']='Media unavailable or exceeds limit; retained partial file for inspection'
         # Failed attachments keep the original remote link, not a broken local link.
         body=markdownify(str(article),heading_style='ATX')
         for a in assets:
-            if a['status']!='downloaded':body=body.replace(']('+a['path']+')',']('+a['url']+')')
+            if a['status']!='downloaded':body=body.replace(']('+a['path']+')',']('+a.get('url',url)+')')
         (directory/'article.md').write_text('---\nsource_url: '+json.dumps(url)+'\n---\n\n'+body)
         (directory/'manifest.json').write_text(json.dumps({'source_url':url,'assets':assets},ensure_ascii=False,indent=2))
         result={'directory':str(directory.resolve()),'status':'complete' if all(a['status']=='downloaded' for a in assets) else 'partial'}
