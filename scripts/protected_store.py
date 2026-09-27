@@ -145,22 +145,29 @@ def archive(root, request):
         index[url] = record
         root.put('.personal-wiki/captures.json', encode(index), replace=True)
         return {**record, 'status': 'existing'}
-    slug = request['slug']
-    if len(slug) > 100 or not re.fullmatch('[a-z][a-z0-9]*(?:-[a-z0-9]+)*', slug):
-        raise ValueError('Invalid English slug')
-    name = slug
-    number = 2
-    while root.optional(f'raw/inputs/{name}.md') is not None or root.optional(f'wiki/sources/{name}.md') is not None:
-        name = f'{slug}--{number}'
-        number += 1
+    intent_path = f'.personal-wiki/imports/{identity}.json'
+    intent = root.optional(intent_path)
+    if intent:
+        record = json.loads(intent)
+        source = str(Path(record['source']).relative_to(root.path))
+    else:
+        slug = request['slug']
+        if len(slug) > 100 or not re.fullmatch('[a-z][a-z0-9]*(?:-[a-z0-9]+)*', slug):
+            raise ValueError('Invalid English slug')
+        name = slug
+        number = 2
+        while root.optional(f'raw/inputs/{name}.md') is not None or root.optional(f'wiki/sources/{name}.md') is not None:
+            name = f'{slug}--{number}'
+            number += 1
+        source = f'raw/inputs/{name}.md'
+        record = dict(id=identity, name=name, url=url, archive=str(root.path / 'raw/assets' / identity),
+                      source=str(root.path / source), hashes=hashes, imported_at=datetime.now(timezone.utc).isoformat(),
+                      status='archived', compilation='not_verified')
+        root.immutable(intent_path, encode(record))
     for path, data in files.items():
         root.immutable(f'raw/assets/{identity}/{path}', data)
-    source = f'raw/inputs/{name}.md'
     # Source adapter is immutable; processing context is stored separately.
     root.immutable(source, files['article.md'])
-    record = dict(id=identity, name=name, url=url, archive=str(root.path / 'raw/assets' / identity),
-                  source=str(root.path / source), hashes=hashes, imported_at=datetime.now(timezone.utc).isoformat(),
-                  status='archived', compilation='not_verified')
     root.immutable(manifest, encode(record))
     index[url] = record
     root.put('.personal-wiki/captures.json', encode(index), replace=True)
@@ -195,6 +202,12 @@ def commit(root, request):
         reference = f"../../raw/assets/{record['id']}/article.md"
         body = b['content'].rstrip() + f"\n\n## 加工来源\n\n[原始提取稿]({reference}) · {record['url']}\n\n来源 ID：{record['id']}；采集时间：{record['imported_at']}\n"
         body = body.replace('](../assets/', '](../../raw/assets/')
+        for attachment in sorted(record['hashes'], key=len, reverse=True):
+            if attachment == 'article.md':
+                continue
+            destination = f"../../raw/assets/{record['id']}/{attachment}"
+            for prefix in ('', './'):
+                body = body.replace('](' + prefix + attachment + ')', '](' + destination + ')')
         candidate = body.encode()
         history = job + '/candidates/' + path
         root.immutable(history, candidate)

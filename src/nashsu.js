@@ -15,6 +15,14 @@ export function createAdapters({vault,python,captureDirectory,flash,refresh=fals
    const index=JSON.parse(await readFile(join(vault,'.personal-wiki/captures.json'),'utf8').catch(e=>{if(e.code==='ENOENT')return '{}';throw e;}));
    const found=index[u.href];if(!found)return null;
    await exec(python,[join(root,'scripts/import_capture.py'),'--vault',vault,'--snapshot',found.archive,'--message','小婕收集 '+u.href],{signal,timeout:60000,maxBuffer:1024*1024});
+   if(found.source.startsWith(join(vault,'raw/inputs')+'/')){
+    const directory=join(vault,'.personal-wiki/compilations',found.id);
+    try{
+     await readFile(join(directory,'generation.json'));
+     const result=await compileArchive({vault,record:found,python,signal});
+     return {...result,status:'existing'};
+    }catch(e){if(e.code!=='ENOENT')throw e;return {status:'pending',source:found.source};}
+   }
    const name=found.name??found.source.split('/').at(-1).replace(/\.md$/u,'');
    const page=join(vault,'wiki/sources',name+'.md');
    try{await readFile(page);return {status:'existing',source:page};}catch(e){if(e.code!=='ENOENT')throw e;return {status:'pending',source:found.source};}
