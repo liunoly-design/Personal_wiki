@@ -46,3 +46,10 @@ test('updated message is accepted only when current sender, chat and command sti
   await assert.rejects(runtime.accept(message,'https://x.com/a/status/123'),/Source mismatch/);
  }finally{await runtime.close();await rm(dir,{recursive:true,force:true});}
 });
+
+test('Flash 402 receipt separates saved capture from incomplete analysis',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'wk-flash-failure-'));const sent=[];
+ const original={message_id:'om_test',chat_id:'oc_test',sender:{id:'ou_test',id_type:'open_id',sender_type:'user'},body:{content:JSON.stringify({text:message.rawText})}};
+ const r=await openRuntime({config:{...scope,stateDir:dir,vault:dir,python:'/usr/bin/python3'},hostConfig:{},flash:{},feishu:{getMessage:async()=>original,reply:async m=>{sent.push(m.text);return{message_id:'om_reply',chat_id:'oc_test'};}},makeAdapters:()=>({capture:async()=>({directory:'/saved',text:'article'}),extract:async()=>{throw Error('Flash HTTP 402; original retained');}})});
+ try{await r.accept(message,'https://x.com/a/status/123');await r.processJobs();assert.match(sent[0],/抓取已完成/);assert.match(sent[0],/Flash.*402/);assert.match(sent[0],/分析尚未完成/);assert.doesNotMatch(sent[0],/登录/);}finally{await r.close();await rm(dir,{recursive:true,force:true});}
+});

@@ -31,7 +31,11 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
       job.result=result;job.receipt=`【Wiki】${result.status==='existing'?'已存在归档':result.status==='pending'?'已归档，分析尚未完成，请检查本机队列':'记录与分析完成'}\n基础名词：${result.terms} 个（新建 ${result.newDefinitions} 个）\n来源卡：${result.source}\n附件：${result.attachmentStatus==='complete'?'已保存':result.attachmentStatus==='previous_archive'?'沿用已有归档':'部分完成，存在失败或待处理附件'}\n基础解释由 Flash 生成，文章关联由 nashsu 加工。`;
      }catch(error){
       if(closed){job.status='queued';await save(file,job);break;}
-      job.failure=error.message;job.receipt='【Wiki】处理未全部完成，已抓取的内容会保留。请检查本机 Wiki 任务记录；登录、额度或编译问题解决后可重试。';
+      job.failure=error.message;
+      const progress=job.stage==='glossary_saved'?'抓取和基础解释已保存，文章分析尚未完成。':job.stage==='captured'?'抓取已完成，内容已保留；基础解释和文章分析尚未完成。':'抓取尚未完成，已下载的部分文件会保留。';
+      const http=error.message?.match(/^Flash HTTP (\d{3});/u)?.[1];
+      const reason=http==='402'?'Flash 服务返回 HTTP 402：请检查 Google AI Studio 项目的预付额度和计费状态。恢复额度后重发原链接；更换文章链接无法解决。':http?`Flash 服务返回 HTTP ${http}，请检查模型服务状态后重试。`:job.stage==='glossary_saved'?'请检查本机 LLM Wiki 的加工队列及模型状态。':job.stage==='captured'?'Flash 名词处理失败，请检查本机任务记录及模型配置。':'请检查页面是否可访问，以及本机抓取任务记录。';
+      job.receipt='【Wiki】处理未全部完成。\n'+progress+'\n'+reason;
      }
      job.status='delivery_pending';await save(file,job);
     }
