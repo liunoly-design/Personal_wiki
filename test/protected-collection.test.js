@@ -36,10 +36,13 @@ test('local media references resolve to immutable archived bytes from the genera
  try{
   const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(join(snapshot,'images'),{recursive:true});
   const original='# Evidence\n![image](images/image-01.jpg)';await writeFile(join(snapshot,'article.md'),original);await writeFile(join(snapshot,'images/image-01.jpg'),'immutable image');
-  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/evidence.md---\n# 证据\n![image](images/image-01.jpg)\n---END FILE---'});
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/evidence.md---\n# 证据\n![image](images/image-01.jpg)\n![caption](images/image-01.jpg "说明")\n![angle](<images/image-01.jpg> "说明")\n![reference][photo]\n\n[photo]: images/image-01.jpg "说明"\n---END FILE---'});
   const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'evidence',context:'',url:'https://x.com/a/status/123'});
   const body=await readFile(result.source,'utf8');const target=body.match(/!\[image\]\(([^)]+)\)/u)[1];
   assert.equal(await readFile(resolve(dirname(result.source),target),'utf8'),'immutable image');
+  assert.ok(body.includes(`![caption](${target} "说明")`));
+  assert.ok(body.includes(`![angle](<${target}> "说明")`));
+  assert.ok(body.includes(`[photo]: ${target} "说明"`));
   assert.equal(await readFile(join(result.archive,'article.md'),'utf8'),original);
  }finally{await rm(root,{recursive:true,force:true});}
 });

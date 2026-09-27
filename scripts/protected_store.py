@@ -201,13 +201,21 @@ def commit(root, request):
         path = b['path']
         reference = f"../../raw/assets/{record['id']}/article.md"
         body = b['content'].rstrip() + f"\n\n## 加工来源\n\n[原始提取稿]({reference}) · {record['url']}\n\n来源 ID：{record['id']}；采集时间：{record['imported_at']}\n"
-        body = body.replace('](../assets/', '](../../raw/assets/')
-        for attachment in sorted(record['hashes'], key=len, reverse=True):
-            if attachment == 'article.md':
-                continue
-            destination = f"../../raw/assets/{record['id']}/{attachment}"
-            for prefix in ('', './'):
-                body = body.replace('](' + prefix + attachment + ')', '](' + destination + ')')
+        destinations = {p: f"../../raw/assets/{record['id']}/{p}" for p in record['hashes']}
+        def rewrite_link(match):
+            target = match.group(2)
+            angled = target.startswith('<')
+            bare = target[1:-1] if angled else target
+            normalized = bare.removeprefix('./')
+            replacement = destinations.get(normalized)
+            if replacement is None and bare.startswith('../assets/'):
+                replacement = '../../raw/assets/' + bare[len('../assets/'):]
+            if replacement is None:
+                return match.group(0)
+            return match.group(1) + ('<' + replacement + '>' if angled else replacement)
+        # Replace only destinations, preserving optional titles and reference IDs.
+        body = re.sub(r'(\]\([ \t]*)(<[^>\n]+>|[^\s)]+)', rewrite_link, body)
+        body = re.sub(r'(^[ \t]{0,3}\[[^]\n]+\]:[ \t]*)(<[^>\n]+>|[^\s]+)', rewrite_link, body, flags=re.M)
         candidate = body.encode()
         history = job + '/candidates/' + path
         root.immutable(history, candidate)
