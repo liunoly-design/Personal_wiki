@@ -33,3 +33,16 @@ test('durable job verifies original message, runs once and replies to the same c
  const runtime=await openRuntime({config,hostConfig:{},feishu:{getMessage:async()=>original,reply:async r=>{assert.equal(r.replyTo,'om_test');sent++;return{message_id:'om_reply',chat_id:'oc_test'};}},flash:{},makeAdapters:()=>({capture:async()=>{runs++;return{directory:'/snapshot',text:'Article'};},extract:async()=>({slug:'sample',terms:[]}),importAndCompile:async()=>({status:'complete',source:'wiki/sources/sample.md'})})});
  try{await writeFile(join(dir,'state/jobs/000-broken.json'),'{');assert.equal((await runtime.accept(message,'https://x.com/a/status/123')).duplicate,false);assert.equal((await runtime.accept(message,'https://x.com/a/status/123')).duplicate,true);await runtime.processJobs();await runtime.processJobs();assert.equal(runs,1);assert.equal(sent,1);assert.ok((await readdir(join(dir,'state/jobs'))).includes('000-broken.json.corrupt'));const files=await readdir(join(dir,'state/jobs'));assert.equal(JSON.parse(await readFile(join(dir,'state/jobs',files.find(n=>n.endsWith('.json'))),'utf8')).status,'done');}finally{await runtime.close();await rm(dir,{recursive:true,force:true});}
 });
+
+test('updated message is accepted only when current sender, chat and command still match',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'wk-edited-'));
+ const original={message_id:'om_test',chat_id:'oc_test',updated:true,sender:{id:'ou_test',id_type:'open_id',sender_type:'user'},body:{content:JSON.stringify({text:message.rawText})}};
+ const runtime=await openRuntime({config:{...scope,stateDir:dir,vault:dir,python:'/usr/bin/python3'},hostConfig:{},feishu:{getMessage:async()=>original},flash:{}});
+ try{
+  assert.equal((await runtime.accept(message,'https://x.com/a/status/123')).duplicate,false);
+  original.body.content=JSON.stringify({text:'小婕 wk 记录：https://x.com/a/status/456'});
+  await assert.rejects(runtime.accept(message,'https://x.com/a/status/123'),/Source command mismatch/);
+  original.deleted=true;
+  await assert.rejects(runtime.accept(message,'https://x.com/a/status/123'),/Source mismatch/);
+ }finally{await runtime.close();await rm(dir,{recursive:true,force:true});}
+});

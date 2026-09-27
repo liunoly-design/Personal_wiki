@@ -18,7 +18,7 @@ export function createPlugin({openRuntime=defaultOpenRuntime}={}){
    try{
     const result=await (await runtime()).accept(c,command.url,ctx.abortSignal);
     return finish(result.duplicate?'【Wiki】这条消息已接收，请勿重复提交；结果以完成回执为准。':'【Wiki】收到，开始采集。新名词会先保存 Flash 基础解释，再分析文章关联；完成后回复结果。');
-   }catch{api.logger.warn('personal-wiki: could not accept request; inspect local state');return finish('【Wiki】本次未确认接收，请检查插件配置及处理记录。');}
+   }catch(error){const known=['Source mismatch','Source command mismatch','Message ID required','Resolved Feishu credentials required','Feishu request failed or result unknown'];const reason=known.includes(error?.message)?error.message:'Local runtime unavailable';api.logger.warn('personal-wiki: could not accept request: '+reason);return finish('【Wiki】本次未确认接收，请检查插件配置及处理记录。');}
   },{priority:110,eligibleDispatchKinds:['agent']});
  }};
 }

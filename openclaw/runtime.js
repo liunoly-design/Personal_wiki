@@ -47,7 +47,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
   async accept(c,url,signal){
    const messageId=c.MessageSidFull??c.MessageSid;if(!/^om_[\w-]+$/u.test(messageId??''))throw Error('Message ID required');
    const original=await feishu.getMessage(messageId,{signal});
-   if(original.message_id!==messageId||original.chat_id!==c.NativeChannelId||original.sender?.id!==c.SenderId||original.sender.id_type!=='open_id'||original.sender.sender_type!=='user'||original.deleted||original.updated)throw Error('Source mismatch');
+   if(original.message_id!==messageId||original.chat_id!==c.NativeChannelId||original.sender?.id!==c.SenderId||original.sender.id_type!=='open_id'||original.sender.sender_type!=='user'||original.deleted)throw Error('Source mismatch');
    const parsed=parseCommand(JSON.parse(original.body.content).text);
    if(parsed?.action!=='record'||parsed.url!==url)throw Error('Source command mismatch');
    const id=createHash('sha256').update(config.accountId+':'+messageId).digest('hex');const file=join(jobs,id+'.json');
