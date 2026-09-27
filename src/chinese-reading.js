@@ -15,10 +15,14 @@ function units(markdown){
    if(rest)result.push({text:rest});
   }
  };
- const fence=/^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[ \t]*(?=\n|$)/gmu;
- let last=0;
- for(const match of markdown.matchAll(fence)){paragraph(markdown.slice(last,match.index));result.push({literal:match[0]});last=match.index+match[0].length;}
- paragraph(markdown.slice(last));
+ let prose='',code='',fence;
+ for(const line of markdown.match(/[^\n]*\n|[^\n]+$/gu)??[]){
+  const marker=line.match(/^ {0,3}(`{3,}|~{3,})([^\n]*)/u);
+  if(fence){code+=line;if(marker&&marker[1][0]===fence[0]&&marker[1].length>=fence.length&&!marker[2].trim()){result.push({literal:code});code='';fence=undefined;}}
+  else if(marker){paragraph(prose);prose='';fence=marker[1];code=line;}
+  else prose+=line;
+ }
+ if(code)result.push({literal:code});paragraph(prose);
  const grouped=[];
  for(let i=0;i<result.length;i++){
   const unit={...result[i]};

@@ -33,7 +33,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
      }catch(error){
       if(closed){job.status='queued';await save(file,job);break;}
       job.failure=error.message;
-      const compiledStages=['glossary_saved','archived','analyzing','generating','committing'];
+      const compiledStages=['glossary_saved','archived','analyzing','generating','committing','compiled','translating'];
       const progress=compiledStages.includes(job.stage)?'抓取和基础解释已保存，文章分析尚未完成。':job.stage==='captured'?'抓取已完成，内容已保留；基础解释和文章分析尚未完成。':'抓取尚未完成，已下载的部分文件会保留。';
       const http=error.message?.match(/^Flash HTTP (\d{3});/u)?.[1];
       const reason=http==='402'?'Flash 服务返回 HTTP 402：请检查 Google AI Studio 项目的预付额度和计费状态。恢复额度后重发原链接；更换文章链接无法解决。':http?`Flash 服务返回 HTTP ${http}，请检查模型服务状态后重试。`:compiledStages.includes(job.stage)?'请检查本机受控编译记录及 Codex CLI 模型状态。':job.stage==='captured'?'Flash 名词处理失败，请检查本机任务记录及模型配置。':'请检查页面是否可访问，以及本机抓取任务记录。';
@@ -80,7 +80,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
    if(job.result?.reading&&/^[a-f0-9]{20}$/u.test(job.result.sourceId??'')){
     try{job.result.reading=JSON.parse(await readFile(join(config.vault,'.personal-wiki/readings',job.result.sourceId,'result.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
    }
-   return {jobId:id,status:job.status,stage:job.stage??'accepted',createdAt:job.createdAt,result:job.result??null,receiptConfirmed:Boolean(job.receiptId)};
+   return {jobId:id,status:job.status,stage:job.stage??'accepted',createdAt:job.createdAt,result:job.result??(job.details?.compilation?{...job.details.compilation,reading:job.details.reading}:null),receiptConfirmed:Boolean(job.receiptId)};
   },
   async retryTranslation(scope,id,signal){
    const current=await this.status(scope,id);

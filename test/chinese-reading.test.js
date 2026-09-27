@@ -12,14 +12,26 @@ test('new English source gets a separate full Chinese reading with original code
   const original='# Small experiment\n\nThe result applies only to this sample.\n\n```js\nconst n = 2;\nconst example = "[x](images/a.jpg)";\n```\n\n[Source](https://example.org/source)\n\n![图](<images/a.jpg> "图片")';
   await mkdir(join(snapshot,'images'));await writeFile(join(snapshot,'images/a.jpg'),'image');
   await writeFile(join(snapshot,'article.md'),original);
-  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async({text})=>text.replace('Small experiment','小型实验').replace('The result applies only to this sample.','结果仅适用于此次样本。').replace('Source','来源'),generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/experiment.md---\n# 实验\n简短摘要。\n---END FILE---'});
-  const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'experiment',context:'',url:'https://x.com/a/status/123'});
+  const stages=[];
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async({text})=>{assert.equal(stages.at(-1).stage,'translating');assert.equal(stages.find(s=>s.stage==='compiled').details.compilation.status,'complete');return text.replace('Small experiment','小型实验').replace('The result applies only to this sample.','结果仅适用于此次样本。').replace('Source','来源');},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/experiment.md---\n# 实验\n简短摘要。\n---END FILE---'});
+  const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'experiment',context:'',url:'https://x.com/a/status/123',onStage:async(stage,details)=>{stages.push({stage,details});}});
   assert.equal(result.reading.status,'complete');
   const body=await readFile(result.reading.path,'utf8');assert.match(body,/# 小型实验/);assert.match(body,/结果仅适用于此次样本/);assert.match(body,/const n = 2;/);assert.match(body,/https:\/\/example.org\/source/);assert.match(body,/原文/);
   assert.equal(await readFile(join(result.archive,'article.md'),'utf8'),original);
   assert.notEqual(result.reading.path,result.source);
   assert.ok(body.includes(`../raw/assets/${result.sourceId}/images/a.jpg`));
   assert.ok(body.includes('const example = "[x](images/a.jpg)";'));
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('indented code fences and longer closing fences preserve code bytes without translation',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-fence-'));
+ try{
+  const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);
+  const code='  ```js\n  console.log("Hello");\n  ````';await writeFile(join(snapshot,'article.md'),'# 代码示例\n\n'+code);
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async()=>assert.fail('code must not enter translation'),generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/example.md---\n# 来源\n---END FILE---'});
+  const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'example',context:'',url:'https://x.com/a/status/123'});
+  assert.equal(result.reading.status,'complete');assert.ok((await readFile(result.reading.path,'utf8')).includes(code));
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

@@ -45,7 +45,9 @@ export function createAdapters({vault,python,captureDirectory,flash,refresh=fals
    const record=await store({operation:'archive',vault,snapshot:capture.directory,slug,url:normalized.href,refresh},{python,signal});
    await onStage('archived',{sourceId:record.id,archive:record.archive});
    const compiled=await compileArchive({vault,record,context,generate,python,signal,onStage});
+   await onStage('compiled',{compilation:compiled});
    if(!reading)return compiled;
+   await onStage('translating',{reading:{status:'processing'}});
    try{return {...compiled,reading:await buildChineseReading({vault,record,translate,python,signal})};}
    catch(error){return {...compiled,reading:{status:'pending',reason:error.message}};}
 
