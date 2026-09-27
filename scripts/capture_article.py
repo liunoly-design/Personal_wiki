@@ -12,9 +12,9 @@ import httpx
 from bs4 import BeautifulSoup
 from markdownify import markdownify
 try:
-    from .media_download import extract_public, video_assets
+    from .media_download import extract_public, video_assets, direct_video_asset
 except ImportError:
-    from media_download import extract_public, video_assets
+    from media_download import extract_public, video_assets, direct_video_asset
 
 
 def request(url, hosts, limit, dest):
@@ -131,7 +131,14 @@ def capture(url, output):
             rel='images/image-%02d%s'%(len(assets)+1,'.webp' if 'format=webp' in u else '.jpg')
             assets.append({'url':u,'path':rel,'kind':'image'});n['src']=rel
         video_nodes=list(article.select('video'))
-        videos=video_assets(media_info) if media_info else ([{'kind':'video','status':'waiting','error':'Public video metadata unavailable'}] if has_video else [])
+        videos=video_assets(media_info) if media_info else []
+        if video_nodes and not media_info:
+            for node in video_nodes:
+                source=node.get('src') or (node.find('source') or {}).get('src','')
+                try:
+                    videos.append(direct_video_asset(source))
+                except (ValueError, httpx.HTTPError):
+                    videos.append({'kind':'video','status':'waiting','error':'Public video metadata unavailable','url':source or url})
         for i,item in enumerate(videos):
             item['path']='videos/video-%02d.mp4'%(i+1)
             assets.append(item)
