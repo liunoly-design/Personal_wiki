@@ -291,46 +291,69 @@ def refresh_terms(root, request):
     if not re.fullmatch('[a-f0-9]{20}', request['runId']):
         raise ValueError('Invalid regeneration ID')
     backup = f".personal-wiki/term-refresh/{request['runId']}/before"
+    recovery = f".personal-wiki/term-refresh/{request['runId']}/displaced"
     updated, conflicts = 0, []
     for change in request['changes']:
         path = change['path']
         if not re.fullmatch(r'(?:glossary|wiki/(?:entities|concepts))/[^/]+\.md', path):
             raise ValueError('Regeneration only accepts term pages')
-        current = root.read(path)
+        displaced = recovery + '/' + path
+        current = root.optional(path)
         candidate = change['content'].encode()
         if current == candidate:
             updated += 1
             continue
-        if sha(current) != change['expectedHash']:
+        # Resume an interrupted move before publishing anything new.
+        moved = root.optional(displaced)
+        if current is None and moved is not None:
+            if sha(moved) != change['expectedHash']:
+                source_fd, source_name = root.parent(displaced)
+                target_fd, target_name = root.parent(path)
+                try:
+                    try:
+                        os.link(source_name, target_name, src_dir_fd=source_fd, dst_dir_fd=target_fd, follow_symlinks=False)
+                    except FileExistsError:
+                        pass
+                finally:
+                    os.close(source_fd); os.close(target_fd)
+                conflicts.append(path)
+                continue
+            current = moved
+        if current is None or sha(current) != change['expectedHash']:
             conflicts.append(path)
             continue
         root.immutable(backup + '/' + path, current)
-        # The user explicitly requested replacement of generated explanations.
-        # Stage privately, recheck the source, and preserve the full previous bytes.
         staging = f".personal-wiki/term-refresh/{request['runId']}/after/{path}"
         root.immutable(staging, candidate)
-        if root.read(path) != current:
-            conflicts.append(path)
-            continue
-        srcfd, srcname = root.parent(staging)
-        dstfd, dstname = root.parent(path)
-        temp = '.refresh-' + uuid4().hex
+        srcfd, srcname = root.parent(path)
+        dstfd, dstname = root.parent(displaced, create=True)
         try:
-            os.link(srcname, temp, src_dir_fd=srcfd, dst_dir_fd=dstfd)
-            if root.read(path) != current:
+            if moved is None:
+                # Retain the actual displaced inode, including writes through
+                # an editor's already-open descriptor. Never replace a new
+                # file an editor publishes at the original path.
+                os.rename(srcname, dstname, src_dir_fd=srcfd, dst_dir_fd=dstfd)
+                os.fsync(srcfd)
+                os.fsync(dstfd)
+            actual = root.read(displaced)
+            if actual != current:
+                try:
+                    os.link(dstname, srcname, src_dir_fd=dstfd, dst_dir_fd=srcfd, follow_symlinks=False)
+                except FileExistsError:
+                    pass
                 conflicts.append(path)
                 continue
-            os.replace(temp, dstname, src_dir_fd=dstfd, dst_dir_fd=dstfd)
-            os.fsync(dstfd)
+            try:
+                root.put(path, candidate)
+            except FileExistsError:
+                conflicts.append(path)
+                continue
             updated += 1
         finally:
-            try:
-                os.unlink(temp, dir_fd=dstfd)
-            except FileNotFoundError:
-                pass
             os.close(srcfd)
             os.close(dstfd)
-    result = dict(updated=updated, conflicts=conflicts, backup=str(root.path / backup))
+    result = dict(updated=updated, conflicts=conflicts, backup=str(root.path / backup),
+                  recovery=str(root.path / recovery))
     root.put(f".personal-wiki/term-refresh/{request['runId']}/result.json", encode(result), replace=True)
     return result
 

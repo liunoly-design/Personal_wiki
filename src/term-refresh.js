@@ -33,17 +33,11 @@ export async function refreshTerms({vault,python,explain,prepareOnly=false,onPro
  await Promise.all([worker(),worker()]);
  const changes=files.map((f,i)=>{
   const d=definitions[entries[i].slug];let content=f.original;
-  if(f.glossary){
-   for(const [heading,value] of [['基础解释',d.definition],['简单例子',d.example],['歧义与不确定性',d.uncertainty]]){
-    const expression=new RegExp('^## '+heading+'\\s*\\n[\\s\\S]*?(?=^## |^> 基础解释|$(?![\\s\\S]))','mu');
-    if(expression.test(content))content=content.replace(expression,()=>`## ${heading}\n\n${value}\n\n`);
-    else content+='\n\n## '+heading+'\n\n'+value+'\n';
-   }
-  }else{
-   content=content.replace(/\n<!-- wiki:definition:start -->[\s\S]*?<!-- wiki:definition:end -->\n/u,'\n');
-   const section='\n<!-- wiki:definition:start -->\n'+intro(d)+'<!-- wiki:definition:end -->\n\n## 文章中的用法与来源\n';
-   content=content.replace(/^(# .+)$/mu,(_,h)=>h+'\n'+section);
-  }
+  // Existing pages have no reliable ownership markers. Keep their full body,
+  // including inline handwritten notes, beneath the refreshed explanation.
+  const section='\n<!-- wiki:definition:start -->\n'+intro(d)+'<!-- wiki:definition:end -->\n\n---\n\n## 原有内容与来源（保留备查）\n';
+  if(/^# .+$/mu.test(content))content=content.replace(/^(# .+)$/mu,(_,h)=>h+'\n'+section);
+  else content='# '+f.title+'\n'+section+'\n'+content;
   return {path:f.path,expectedHash:f.hash,content};
  });
  const plan={operation:'refresh-terms',vault,runId,changes};

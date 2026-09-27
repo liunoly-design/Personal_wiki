@@ -130,12 +130,17 @@ def capture(url, output):
             if '/profile_images/' in u:n.decompose();continue
             rel='images/image-%02d%s'%(len(assets)+1,'.webp' if 'format=webp' in u else '.jpg')
             assets.append({'url':u,'path':rel,'kind':'image'});n['src']=rel
-        for node in list(article.select('video')):node.decompose()
+        video_nodes=list(article.select('video'))
         videos=video_assets(media_info) if media_info else ([{'kind':'video','status':'waiting','error':'Public video metadata unavailable'}] if has_video else [])
         for i,item in enumerate(videos):
             item['path']='videos/video-%02d.mp4'%(i+1)
             assets.append(item)
-            anchor=soup.new_tag('a',href=item.get('url',url));anchor.string='视频 %d（不转录）'%(i+1);article.append(anchor)
+            anchor=soup.new_tag('a',href=item.get('url',url));anchor.string='视频 %d（不转录）'%(i+1)
+            if i<len(video_nodes):video_nodes[i].replace_with(anchor)
+            else:
+                anchor.string+='（原位置无法确认）';article.append(anchor)
+        for node in video_nodes[len(videos):]:
+            anchor=soup.new_tag('a',href=url);anchor.string='视频（待处理）';node.replace_with(anchor)
         for a in assets:
             if a.get('status')=='waiting':continue
             dest=directory/a['path'];dest.parent.mkdir(exist_ok=True);temp=dest.with_suffix(dest.suffix+'.part')

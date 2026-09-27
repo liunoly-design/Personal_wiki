@@ -35,7 +35,7 @@ class CaptureMediaTest(unittest.TestCase):
   with tempfile.TemporaryDirectory() as temp:
    root=Path(temp);sample=root/'sample.mp4'
    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-y','-f','lavfi','-i','color=c=black:s=160x90:d=0.1','-c:v','libx264',str(sample)],check=True,capture_output=True)
-   html='<article><a href="/a/status/123">Post</a><p>Media sample</p><img src="https://pbs.twimg.com/sample.jpg"><video src="https://video.twimg.com/sample.mp4"></video></article>'
+   html='<article><a href="/a/status/123">Post</a><p>Media sample</p><img src="https://pbs.twimg.com/sample.jpg"><video src="https://video.twimg.com/sample.mp4"></video><p>After the video</p></article>'
    def request(url,hosts,limit,dest):
     if url.startswith('https://x.com'):dest.write_text(html)
     elif 'pbs.twimg.com' in url:dest.write_bytes(b'synthetic image')
@@ -45,5 +45,5 @@ class CaptureMediaTest(unittest.TestCase):
     result=capture('https://x.com/a/status/123',root/'capture')
    self.assertEqual(result['status'],'complete')
    body=(Path(result['directory'])/'article.md').read_text()
-   self.assertIn('images/image-01.jpg',body);self.assertIn('videos/video-01.mp4',body)
+   self.assertLess(body.index('videos/video-01.mp4'),body.index('After the video'));self.assertIn('images/image-01.jpg',body);self.assertIn('videos/video-01.mp4',body)
    self.assertEqual((Path(result['directory'])/'videos/video-01.mp4').read_bytes(),sample.read_bytes())
