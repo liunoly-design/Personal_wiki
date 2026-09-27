@@ -15,3 +15,18 @@ test('regeneration defines entities directly and preserves article evidence, han
   assert.equal(await readFile(join(root,'raw/original.md'),'utf8'),'untouched');assert.ok(result.backup);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('public resume command restores a page after interruption between move and publication',async()=>{
+ const {rename}=await import('node:fs/promises');const {execFileSync}=await import('node:child_process');
+ const vault=await mkdtemp(join(tmpdir(),'wiki-refresh-resume-'));
+ try{
+  await mkdir(join(vault,'glossary'));await writeFile(join(vault,'glossary/a.md'),'# A\n\nOriginal handwritten note.');
+  const plan=await refreshTerms({vault,python:'python3',prepareOnly:true,explain:async ts=>ts.map(t=>({...t,definition:'基础定义',example:'例子',uncertainty:'待核实'}))});
+  const displaced=join(vault,'.personal-wiki/term-refresh',plan.runId,'displaced/glossary');await mkdir(displaced,{recursive:true});
+  await rename(join(vault,'glossary/a.md'),join(displaced,'a.md'));
+  const args=['scripts/refresh-terms.js',vault,'--resume-plan',plan.plan];
+  const result=JSON.parse(execFileSync(process.execPath,args,{encoding:'utf8'}));assert.equal(result.updated,1);assert.deepEqual(result.conflicts,[]);
+  const body=await readFile(join(vault,'glossary/a.md'),'utf8');assert.match(body,/基础定义/);assert.match(body,/Original handwritten note/);
+  execFileSync(process.execPath,args);assert.equal(await readFile(join(vault,'glossary/a.md'),'utf8'),body);
+ }finally{await rm(vault,{recursive:true,force:true});}
+});

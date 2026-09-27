@@ -140,6 +140,7 @@ def capture(url, output):
             else:
                 anchor.string+='（原位置无法确认）';article.append(anchor)
         for node in video_nodes[len(videos):]:
+            assets.append({'kind':'video','status':'waiting','url':url,'path':'','error':'Unmatched original video node'})
             anchor=soup.new_tag('a',href=url);anchor.string='视频（待处理）';node.replace_with(anchor)
         for a in assets:
             if a.get('status')=='waiting':continue

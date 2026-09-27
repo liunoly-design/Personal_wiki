@@ -125,3 +125,13 @@ test('archive interrupted between source creation and manifest resumes using the
   assert.deepEqual(await readdir(join(vault,'raw/inputs')),['evidence.md']);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('new entity pages define what the term is before article evidence',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-definition-'));
+ try{
+  const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);await writeFile(join(snapshot,'article.md'),'# Example\nAn article about Canvas.');
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{explain:async terms=>terms.map(t=>({...t,definition:'Canvas 是绘图元素。',example:'画一个圆。',uncertainty:'与同名产品区分。'}))},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/example.md---\n# 示例\n文章。\n---END FILE---\n---FILE: wiki/entities/canvas.md---\n# Canvas\n作者用它画图。\n---END FILE---'});
+  await adapters.importAndCompile({capture:{directory:snapshot},slug:'example',context:'',url:'https://x.com/a/status/123'});
+  const body=await readFile(join(vault,'wiki/entities/canvas.md'),'utf8');assert.ok(body.indexOf('Canvas 是绘图元素')<body.indexOf('作者用它画图'));assert.match(body,/未经独立核实/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
