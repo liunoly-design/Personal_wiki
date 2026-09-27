@@ -1,1 +1,89 @@
-{"id":"personal-wiki","name":"Personal Wiki","description":"Record explicit 小婕 wk Feishu links, save Flash foundations, then compile with nashsu.","activation":{"onStartup":true},"configSchema":{"type":"object","additionalProperties":false,"properties":{"enabled":{"type":"boolean","default":false},"accountId":{"type":"string"},"entryAgentId":{"type":"string"},"allowedSenderIds":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^ou_[A-Za-z0-9_-]+$"}},"allowedConversationIds":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^oc_[A-Za-z0-9_-]+$"}},"vault":{"type":"string","pattern":"^/"},"stateDir":{"type":"string","pattern":"^/"},"python":{"type":"string","pattern":"^/"},"flashModel":{"type":"string","default":"gemini-flash-latest"}},"allOf":[{"if":{"properties":{"enabled":{"const":true}},"required":["enabled"]},"then":{"required":["accountId","entryAgentId","allowedSenderIds","allowedConversationIds","vault","stateDir","python"]}}]}}
+{
+  "id": "personal-wiki",
+  "name": "Personal Wiki",
+  "description": "Record explicit 小婕 wk Feishu links, save Flash foundations, then compile with nashsu.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": false
+      },
+      "accountId": {
+        "type": "string"
+      },
+      "entryAgentId": {
+        "type": "string"
+      },
+      "allowedSenderIds": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string",
+          "pattern": "^ou_[A-Za-z0-9_-]+$"
+        }
+      },
+      "allowedConversationIds": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string",
+          "pattern": "^oc_[A-Za-z0-9_-]+$"
+        }
+      },
+      "vault": {
+        "type": "string",
+        "pattern": "^/"
+      },
+      "stateDir": {
+        "type": "string",
+        "pattern": "^/"
+      },
+      "python": {
+        "type": "string",
+        "pattern": "^/"
+      },
+      "flashModel": {
+        "type": "string",
+        "default": "gemini-flash-latest"
+      },
+      "codexBinary": {
+        "type": "string",
+        "pattern": "^/"
+      },
+      "compilerModel": {
+        "type": "string",
+        "default": "gpt-6-sol"
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "enabled": {
+              "const": true
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        },
+        "then": {
+          "required": [
+            "accountId",
+            "entryAgentId",
+            "allowedSenderIds",
+            "allowedConversationIds",
+            "vault",
+            "stateDir",
+            "python"
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -26,7 +26,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
     if(job.status!=='delivery_pending'){
      job.status='processing';await save(file,job);
      try{
-      const deps=makeAdapters({vault:config.vault,python:config.python,captureDirectory:join(config.stateDir,'captures',job.id),flash});
+      const deps=makeAdapters({vault:config.vault,python:config.python,captureDirectory:join(config.stateDir,'captures',job.id),flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel});
       const result=await recordArticle({url:job.url,vault:config.vault,signal:controller.signal,onStage:async(stage,details)=>{job.stage=stage;job.details={...job.details,...details};await save(file,job);}},deps);
       job.result=result;job.receipt=`【Wiki】${result.status==='existing'?'已存在归档':result.status==='pending'?'已归档，分析尚未完成，请检查本机队列':'记录与分析完成'}\n基础名词：${result.terms} 个（新建 ${result.newDefinitions} 个）\n来源卡：${result.source}\n附件：${result.attachmentStatus==='complete'?'已保存':result.attachmentStatus==='previous_archive'?'沿用已有归档':'部分完成，存在失败或待处理附件'}\n基础解释由 Flash 生成，文章关联由 nashsu 加工。`;
      }catch(error){
