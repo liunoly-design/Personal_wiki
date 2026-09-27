@@ -4,7 +4,7 @@
 
 ## 复用与调整
 
-固定 nashsu v0.6.11 / `e8082119649e6a8e1cf85eaf289adcabfdf39d4e` 的分析、生成提示词及 FILE 解析器。提取代码与完整 GPL-3.0 许可证在 `vendor/nashsu/`。中文输出显式固定；知识编译模型沿用 `gpt-6-sol`，可通过 `compilerModel` 配置；全文翻译未来单独指定 `gpt-5.6-terra`。
+固定 nashsu v0.6.11 / `e8082119649e6a8e1cf85eaf289adcabfdf39d4e` 的分析、生成提示词及 FILE 解析器。提取代码与完整 GPL-3.0 许可证在 `vendor/nashsu/`。中文输出显式固定；知识编译模型沿用 `gpt-6-sol`，可通过 `compilerModel` 配置；全文翻译在独立阅读流程中指定 `gpt-5.6-terra`，见 [中文阅读开发验收](chinese-reading.md)。
 
 0.6.11 没有安全的无界面候选编译 API。桌面自动编译会直接写页，所以本实现不把新来源送入 `raw/sources`，也不调用 rescan。改为 Codex CLI 在临时目录、read-only sandbox 中产出文本，再由程序提交。CLI 忽略用户配置与规则、不持久化会话；应用配置和令牌不注入提示词。详见 [源码核查](../research/safe-ingest-options.md)。
 

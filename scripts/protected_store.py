@@ -174,6 +174,43 @@ def archive(root, request):
     return record
 
 
+def rewrite_attachments(body, record, base):
+    destinations = {p: f"{base}/raw/assets/{record['id']}/{p}" for p in record['hashes']}
+    def rewrite_link(match):
+        target = match.group(2)
+        angled = target.startswith('<')
+        bare = target[1:-1] if angled else target
+        normalized = bare.removeprefix('./')
+        replacement = destinations.get(normalized)
+        if replacement is None and bare.startswith('../assets/'):
+            replacement = base + '/raw/assets/' + bare[len('../assets/'):]
+        if replacement is None:
+            return match.group(0)
+        return match.group(1) + ('<' + replacement + '>' if angled else replacement)
+    def prose(text):
+        text = re.sub(r'(\]\([ \t]*)(<[^>\n]+>|[^\s)]+)', rewrite_link, text)
+        return re.sub(r'(^[ \t]{0,3}\[[^]\n]+\]:[ \t]*)(<[^>\n]+>|[^\s]+)', rewrite_link, text, flags=re.M)
+    # Code examples are content, not attachment links. Preserve their bytes.
+    result, fence = [], None
+    for line in body.splitlines(keepends=True):
+        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line.rstrip('\r\n'))
+        if fence:
+            result.append(line)
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                fence = None
+        elif marker:
+            fence = marker[1]
+            result.append(line)
+        else:
+            cursor = 0
+            for span in re.finditer(r'(`+).*?\1', line):
+                result.append(prose(line[cursor:span.start()]))
+                result.append(span[0])
+                cursor = span.end()
+            result.append(prose(line[cursor:]))
+    return ''.join(result)
+
+
 def commit(root, request):
     record = json.loads(root.read(f".personal-wiki/{request['sourceId']}.json"))
     verify(root, record)
@@ -201,21 +238,7 @@ def commit(root, request):
         path = b['path']
         reference = f"../../raw/assets/{record['id']}/article.md"
         body = b['content'].rstrip() + f"\n\n## 加工来源\n\n[原始提取稿]({reference}) · {record['url']}\n\n来源 ID：{record['id']}；采集时间：{record['imported_at']}\n"
-        destinations = {p: f"../../raw/assets/{record['id']}/{p}" for p in record['hashes']}
-        def rewrite_link(match):
-            target = match.group(2)
-            angled = target.startswith('<')
-            bare = target[1:-1] if angled else target
-            normalized = bare.removeprefix('./')
-            replacement = destinations.get(normalized)
-            if replacement is None and bare.startswith('../assets/'):
-                replacement = '../../raw/assets/' + bare[len('../assets/'):]
-            if replacement is None:
-                return match.group(0)
-            return match.group(1) + ('<' + replacement + '>' if angled else replacement)
-        # Replace only destinations, preserving optional titles and reference IDs.
-        body = re.sub(r'(\]\([ \t]*)(<[^>\n]+>|[^\s)]+)', rewrite_link, body)
-        body = re.sub(r'(^[ \t]{0,3}\[[^]\n]+\]:[ \t]*)(<[^>\n]+>|[^\s]+)', rewrite_link, body, flags=re.M)
+        body = rewrite_attachments(body, record, '../..')
         candidate = body.encode()
         history = job + '/candidates/' + path
         root.immutable(history, candidate)
@@ -251,6 +274,19 @@ def commit(root, request):
     return result
 
 
+def publish_reading(root, request):
+    record = json.loads(root.read(f".personal-wiki/{request['sourceId']}.json"))
+    verify(root, record)
+    path = f"reading/{record['name']}.zh.md"
+    body = (f"---\nsource_id: {record['id']}\nrepresentation: chinese-reading\nmodel: {request['model']}\n---\n\n"
+            + request['content'].rstrip() + f"\n\n[核对原文](../raw/assets/{record['id']}/article.md)\n")
+    body = rewrite_attachments(body, record, '..')
+    root.immutable(path, body.encode())
+    result = dict(status='complete', path=str(root.path / path), sourceId=record['id'], model=request['model'])
+    root.immutable(f".personal-wiki/readings/{record['id']}/result.json", encode(result))
+    return result
+
+
 if __name__ == '__main__':
     request = json.load(sys.stdin)
     root = Root(request['vault'])
@@ -259,6 +295,17 @@ if __name__ == '__main__':
         operation = request['operation']
         if operation == 'archive':
             result = archive(root, request)
+        elif operation in ('verify', 'reading-unit'):
+            record = json.loads(root.read(f".personal-wiki/{request['sourceId']}.json"))
+            if operation == 'verify':
+                verify(root, record)
+            if operation == 'reading-unit':
+                if not re.fullmatch('[a-f0-9]{64}', request['key']):
+                    raise ValueError('Invalid reading unit')
+                root.immutable(f".personal-wiki/readings/{record['id']}/units/{request['key']}.md", request['content'].encode())
+            result = {'verified': True}
+        elif operation == 'reading':
+            result = publish_reading(root, request)
         elif operation == 'commit':
             result = commit(root, request)
         else:
