@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/nashsu/llm_wiki",
+  "tag": "v0.6.11",
+  "commit": "e8082119649e6a8e1cf85eaf289adcabfdf39d4e",
+  "license": "GPL-3.0",
+  "asset": "https://github.com/nashsu/llm_wiki/releases/download/v0.6.11/LLM.Wiki_aarch64.app.tar.gz",
+  "downloaded_sha256": "9625672a3be10b4c772641885349e1718b9c42d3b0804600da3117fc6a39256b",
+  "note": "Downloaded artifact hash is recorded for reproducibility, not an upstream signature. Official release installed without modifying upstream code."
+}
