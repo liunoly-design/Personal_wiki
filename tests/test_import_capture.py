@@ -12,6 +12,15 @@ class CaptureTest(unittest.TestCase):
    b=json.loads(subprocess.check_output(args+['--refresh'],text=True))
    self.assertEqual(Path(b['source']).name,'medical-service-pricing-guidelines--2.md')
    self.assertTrue(Path(a['source']).is_file())
+ def test_context_never_changes_original(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp);snap=root/'snapshot';snap.mkdir();original='# Article\nOriginal bytes';(snap/'article.md').write_text(original)
+   context=root/'context.md';context.write_text('Flash explanation')
+   args=[sys.executable,str(SCRIPT),'--vault',str(root/'vault'),'--snapshot',str(snap),'--analysis-context',str(context),'--message','小婕收集 https://x.com/example/status/123']
+   result=json.loads(subprocess.check_output(args,text=True))
+   self.assertEqual((Path(result['archive'])/'article.md').read_text(),original)
+   self.assertIn('加工说明（非原文）',Path(result['source']).read_text())
+   self.assertIn('Flash explanation',Path(result['source']).read_text())
  def test_concurrent_collection_produces_one_source(self):
   with tempfile.TemporaryDirectory() as temp:
    root=Path(temp);snap=root/'snapshot';snap.mkdir();(snap/'article.md').write_text('# Same source')

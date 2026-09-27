@@ -1,0 +1,1 @@
+{"name":"personal-wiki","version":"0.2.0","private":true,"type":"module","engines":{"node":">=24"},"scripts":{"test":"node --test","plugin:validate":"node scripts/check-plugin.js"},"openclaw":{"extensions":["./openclaw/index.js"],"compat":{"pluginApi":">=2026.9.6","minGatewayVersion":"2026.9.6"}}}

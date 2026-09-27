@@ -31,7 +31,7 @@ def atomic_json(path, value):
     os.replace(temp, path)
 
 
-def collect(vault, snapshot, message, refresh=False, name=None):
+def collect(vault, snapshot, message, refresh=False, name=None, analysis_context=None):
     if not message.startswith('小婕收集 '):
         raise ValueError('Message must start with 小婕收集 followed by a space')
     urls = re.findall(r'https?://[^\s]+', message)
@@ -111,6 +111,8 @@ def collect(vault, snapshot, message, refresh=False, name=None):
             if relative != 'article.md':
                 content = content.replace('](' + relative + ')', '](' + '../assets/' + identity + '/' + relative + ')')
         content += '\n\n## 归档出处\n\n原始 URL：' + url + '\n\n[原始提取文件](../assets/' + identity + '/article.md)\n'
+        if analysis_context:
+            content += '\n\n## 加工说明（非原文）\n\n' + Path(analysis_context).read_text() + '\n'
         if not source.exists():
             temporary = state / (identity + '.md.tmp')
             temporary.write_text(content)
@@ -133,5 +135,6 @@ if __name__ == '__main__':
     parser.add_argument('--message', required=True)
     parser.add_argument('--refresh', action='store_true')
     parser.add_argument('--name', help='Readable English kebab-case title; required for non-English source titles')
+    parser.add_argument('--analysis-context', help='Separate processing context appended to the adapter, never to original bytes')
     args = parser.parse_args()
-    print(json.dumps(collect(args.vault, args.snapshot, args.message, args.refresh, args.name), ensure_ascii=False))
+    print(json.dumps(collect(args.vault, args.snapshot, args.message, args.refresh, args.name, args.analysis_context), ensure_ascii=False))

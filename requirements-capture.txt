@@ -1,0 +1,5 @@
+magicmd==0.7.15
+httpx>=0.28,<0.29
+beautifulsoup4>=4.13,<5
+markdownify>=1.2,<2
+imageio-ffmpeg>=0.6,<0.7

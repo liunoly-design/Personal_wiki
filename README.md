@@ -24,3 +24,7 @@
 - 已完成 `setup-matt-pocock-skills` 的项目配置：GitHub Issues、默认五个标签、单一上下文文档布局；配置见 `docs/agents/`。这里记录标签映射，尚未在远端创建标签。
 - 后续按 `grill-with-docs → to-spec → to-tickets → implement` 推进功能。术语和设计决定在讨论中逐步写入 `CONTEXT.md` 和 `docs/adr/`。
 - 本仓库不存放私人 Vault 和运行凭据。上级项目链接依赖 Personal OS 目录布局，独立克隆时需另行取得相关文档。
+
+## 飞书 Wiki 插件
+
+已实现 `小婕 wk 记录：链接` 的本地插件；先用 Gemini Flash 保存名词基础解释，再交给 nashsu 分析文章关联。安装命令、模型费用和当前限制见 [飞书 Wiki 入口](docs/openclaw-wiki.md)。查询与讨论暂时预留，真实飞书部署尚待运行安装命令。
