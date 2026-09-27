@@ -4,6 +4,8 @@
 
 2026-09-27 安装结果：nashsu 0.6.11＋Codex CLI 已在独立 Vault 中生成两份样本的来源卡、概念和实体。见[运行说明](docs/nashsu-local.md)及[实测报告](docs/research/nashsu-install-test-2026-09-27.md)。飞书自动收集尚未接通，完整规格见 [Issue #1](https://github.com/liunoly-design/Personal_wiki/issues/1)。
 
+可用入口和验收范围见[当前用例清单](docs/current-capabilities.md)。
+
 共享 OpenClaw 已建立独立 `wiki` 运行 Agent，由飞书入口“小婕”调度；飞书端当前仅支持对明确提供的资料生成整理草稿，与本机 Vault 归档工具的连接尚未接入。运行架构见上级 `OpenClaw/README.md`。
 
 - [需求文档](需求文档.md)：范围、已确认需求与验收目标。

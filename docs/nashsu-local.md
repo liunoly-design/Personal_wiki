@@ -19,17 +19,20 @@ python3 scripts/wiki_status.py
 python3 scripts/import_capture.py \
   --vault /Users/mac/Documents/Personal-Wiki-Vault \
   --snapshot /absolute/path/to/captured-package \
+  --name readable-english-article-title \
   --message '小婕收集 https://x.com/author/status/123'
 ```
 
 归档包只增不改，原始文件逐个记录哈希；适配后的 Markdown 放入上游监听的来源目录。nashsu 常驻时自动排队加工。返回 `archived` 只代表原件已保存，编译状态需另查。重复输入返回 `existing`；显式重新收集使用 `--refresh`，新内容保留新快照。
+
+原文入口和来源卡使用可读的英文文件名。英文一级标题可自动转为短横线文件名；中文标题由调用方通过 `--name` 提供英文短标题。相同文件名出现新内容时追加 `--2`、`--3`，内部去重 ID 及附件包目录仍保留哈希。已有两份样本已迁移为 `wechat-medical-service-pricing-guidelines.md` 与 `x-39-video-styles-and-opus-workflow.md`，原始字节未改动。
 
 初次编译可能产生错误的原件相对链接。验收发现这种问题时，可针对明确的初次生成来源卡执行：
 
 ```sh
 python3 scripts/finalize_capture.py \
   --vault /Users/mac/Documents/Personal-Wiki-Vault \
-  --source-id <import返回的id>
+  --source-id <import返回的name或来源卡文件名去掉md后缀>
 ```
 
 脚本保留生成页修改前历史，不修改原件。不要把它作为长期手写笔记的自动编辑器。

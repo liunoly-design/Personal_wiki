@@ -2,6 +2,16 @@ import json, subprocess, sys, tempfile, unittest
 from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/import_capture.py'
 class CaptureTest(unittest.TestCase):
+ def test_readable_english_name_and_same_title_keep_both_versions(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp);snap=root/'snapshot';snap.mkdir();(snap/'article.md').write_text('# 中文标题\n第一版')
+   args=[sys.executable,str(SCRIPT),'--vault',str(root/'vault'),'--snapshot',str(snap),'--name','medical-service-pricing-guidelines','--message','小婕收集 https://x.com/example/status/123']
+   first=subprocess.run(args,capture_output=True,text=True);self.assertEqual(first.returncode,0,first.stderr)
+   a=json.loads(first.stdout);self.assertEqual(Path(a['source']).name,'medical-service-pricing-guidelines.md')
+   (snap/'article.md').write_text('# 中文标题\n第二版')
+   b=json.loads(subprocess.check_output(args+['--refresh'],text=True))
+   self.assertEqual(Path(b['source']).name,'medical-service-pricing-guidelines--2.md')
+   self.assertTrue(Path(a['source']).is_file())
  def test_concurrent_collection_produces_one_source(self):
   with tempfile.TemporaryDirectory() as temp:
    root=Path(temp);snap=root/'snapshot';snap.mkdir();(snap/'article.md').write_text('# Same source')
@@ -17,7 +27,7 @@ class CaptureTest(unittest.TestCase):
    root=Path(temp); snap=root/'snapshot';snap.mkdir();(snap/'images').mkdir()
    (snap/'article.md').write_text('# 示例\n\n![图](images/a.png)\n')
    (snap/'raw.html').write_text('<article>原件</article>');(snap/'images/a.png').write_bytes(b'image')
-   args=[sys.executable,str(SCRIPT),'--vault',str(root/'vault'),'--snapshot',str(snap),'--message','小婕收集 https://x.com/example/status/123?s=20']
+   args=[sys.executable,str(SCRIPT),'--vault',str(root/'vault'),'--snapshot',str(snap),'--name','example-article','--message','小婕收集 https://x.com/example/status/123?s=20']
    first=subprocess.run(args,capture_output=True,text=True);self.assertEqual(first.returncode,0,first.stderr)
    a=json.loads(first.stdout);self.assertEqual(a['status'],'archived')
    (snap/'raw.html').write_text('修改后的输入')

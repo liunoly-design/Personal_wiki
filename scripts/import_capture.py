@@ -31,7 +31,7 @@ def atomic_json(path, value):
     os.replace(temp, path)
 
 
-def collect(vault, snapshot, message, refresh=False):
+def collect(vault, snapshot, message, refresh=False, name=None):
     if not message.startswith('小婕收集 '):
         raise ValueError('Message must start with 小婕收集 followed by a space')
     urls = re.findall(r'https?://[^\s]+', message)
@@ -72,7 +72,23 @@ def collect(vault, snapshot, message, refresh=False):
         hashes = {str(p.relative_to(snapshot)): digest(p) for p in files}
         identity = hashlib.sha256((url + json.dumps(hashes, sort_keys=True)).encode()).hexdigest()[:20]
         archive = vault / 'raw/assets' / identity
-        source = vault / 'raw/sources' / (identity + '.md')
+        manifest = state / (identity + '.json')
+        if manifest.exists():
+            source = Path(json.loads(manifest.read_text())['source'])
+        else:
+            if name is None:
+                heading = re.search(r'^#\s+(.+)$', (snapshot / 'article.md').read_text(), re.M)
+                title = heading.group(1).strip() if heading else ''
+                if not title.isascii() or not re.search('[A-Za-z]', title):
+                    raise ValueError('Provide --name with a readable English title for this source')
+                name = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:100].rstrip('-')
+            if not re.fullmatch(r'[a-z][a-z0-9]*(?:-[a-z0-9]+)*', name) or len(name) > 100:
+                raise ValueError('--name must be an English lowercase kebab-case title, at most 100 characters')
+            source = vault / 'raw/sources' / (name + '.md')
+            version = 2
+            while source.exists() or (vault / 'wiki/sources' / source.name).exists():
+                source = vault / 'raw/sources' / (name + '--' + str(version) + '.md')
+                version += 1
         archive.parent.mkdir(parents=True, exist_ok=True)
         source.parent.mkdir(parents=True, exist_ok=True)
         if not archive.exists():
@@ -101,7 +117,7 @@ def collect(vault, snapshot, message, refresh=False):
             os.rename(temporary, source)
         elif source.read_text() != content:
             raise ValueError('Existing source differs; refusing to overwrite')
-        result = {'id': identity, 'url': url, 'archive': str(archive), 'source': str(source),
+        result = {'id': identity, 'name': source.stem, 'url': url, 'archive': str(archive), 'source': str(source),
                   'status': 'archived', 'imported_at': datetime.now(timezone.utc).isoformat(),
                   'hashes': hashes, 'compilation': 'not_verified'}
         atomic_json(state / (identity + '.json'), result)
@@ -116,5 +132,6 @@ if __name__ == '__main__':
     parser.add_argument('--snapshot', required=True)
     parser.add_argument('--message', required=True)
     parser.add_argument('--refresh', action='store_true')
+    parser.add_argument('--name', help='Readable English kebab-case title; required for non-English source titles')
     args = parser.parse_args()
-    print(json.dumps(collect(args.vault, args.snapshot, args.message, args.refresh), ensure_ascii=False))
+    print(json.dumps(collect(args.vault, args.snapshot, args.message, args.refresh, args.name), ensure_ascii=False))
