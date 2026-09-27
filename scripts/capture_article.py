@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Capture one supported public URL. No account cookies or browser bypass."""
 import argparse
+import copy
 import json
 import subprocess
 import sys
@@ -54,6 +55,19 @@ def select_target_article(soup, url):
     def signature(a):
         return (a.get_text(' ',strip=True),tuple((n.name,n.get('href'),n.get('src')) for n in a.select('a,img,video,source')))
     leaves=list({signature(a):a for a in leaves}.values())
+    if len(leaves)>1:
+        # Responsive copies can show the same post with/without an embedded
+        # quote. Compare only the target's own content, then retain a variant
+        # containing every quote seen in the other equivalent copies.
+        def own_signature(a):
+            own=copy.copy(a)
+            for nested in own.select('article'):nested.decompose()
+            return signature(own)
+        if len({own_signature(a) for a in leaves})==1:
+            quote_sets=[{signature(q) for q in a.select('article')} for a in leaves]
+            union=set().union(*quote_sets)
+            complete=[a for a,quotes in zip(leaves,quote_sets) if quotes==union]
+            if complete:leaves=[complete[0]]
     if len(leaves)!=1:
         raise ValueError('Cannot identify the requested X post unambiguously')
     return leaves[0]
