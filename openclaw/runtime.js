@@ -14,6 +14,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
  const feishu=injectedFeishu??createFeishuClient({credentials:()=>({appId:account.appId,appSecret:account.appSecret})});
  const flash=injectedFlash??createFlash({model:config.flashModel??'gemini-flash-latest',usagePath:join(config.stateDir,'flash-usage.jsonl')});
  let timer,running=false,closed=false;const controller=new AbortController();
+ function checkScope(c){if(c.Provider!=='feishu'||c.AccountId!==config.accountId||!config.allowedSenderIds.includes(c.SenderId)||!config.allowedConversationIds.includes(c.NativeChannelId))throw Error('Wiki scope denied');}
  async function processJobs(){
   if(running||closed)return;running=true;
   try{
@@ -28,13 +29,14 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
      try{
       const deps=makeAdapters({vault:config.vault,python:config.python,captureDirectory:join(config.stateDir,'captures',job.id),flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel});
       const result=await recordArticle({url:job.url,vault:config.vault,signal:controller.signal,onStage:async(stage,details)=>{job.stage=stage;job.details={...job.details,...details};await save(file,job);}},deps);
-      job.result=result;job.receipt=`【Wiki】${result.status==='existing'?'已存在归档':result.status==='pending'?'已归档，分析尚未完成，请检查本机队列':'记录与分析完成'}\n基础名词：${result.terms} 个（新建 ${result.newDefinitions} 个）\n来源卡：${result.source}\n附件：${result.attachmentStatus==='complete'?'已保存':result.attachmentStatus==='previous_archive'?'沿用已有归档':'部分完成，存在失败或待处理附件'}\n基础解释由 Flash 生成，文章关联由 nashsu 加工。`;
+      job.result=result;job.receipt=`【Wiki】${result.status==='existing'?'已存在归档':result.status==='pending'?'已归档，分析尚未完成，请检查本机队列':'记录与分析完成'}\n标题：${result.title??'见来源卡'}\n摘要：${result.summary??'见来源卡'}\n基础名词：${result.terms} 个（新建 ${result.newDefinitions} 个）\n来源卡：${result.source}\n附件：${result.attachmentStatus==='complete'?'已保存':result.attachmentStatus==='previous_archive'?'沿用已有归档':'部分完成，存在失败或待处理附件'}\n待审编号：${result.reviews?.map(r=>r.id).join('、')||'无新增待审'}\n基础解释由 Flash 生成，文章关联复用 nashsu 编译逻辑。`;
      }catch(error){
       if(closed){job.status='queued';await save(file,job);break;}
       job.failure=error.message;
-      const progress=job.stage==='glossary_saved'?'抓取和基础解释已保存，文章分析尚未完成。':job.stage==='captured'?'抓取已完成，内容已保留；基础解释和文章分析尚未完成。':'抓取尚未完成，已下载的部分文件会保留。';
+      const compiledStages=['glossary_saved','archived','analyzing','generating','committing'];
+      const progress=compiledStages.includes(job.stage)?'抓取和基础解释已保存，文章分析尚未完成。':job.stage==='captured'?'抓取已完成，内容已保留；基础解释和文章分析尚未完成。':'抓取尚未完成，已下载的部分文件会保留。';
       const http=error.message?.match(/^Flash HTTP (\d{3});/u)?.[1];
-      const reason=http==='402'?'Flash 服务返回 HTTP 402：请检查 Google AI Studio 项目的预付额度和计费状态。恢复额度后重发原链接；更换文章链接无法解决。':http?`Flash 服务返回 HTTP ${http}，请检查模型服务状态后重试。`:job.stage==='glossary_saved'?'请检查本机 LLM Wiki 的加工队列及模型状态。':job.stage==='captured'?'Flash 名词处理失败，请检查本机任务记录及模型配置。':'请检查页面是否可访问，以及本机抓取任务记录。';
+      const reason=http==='402'?'Flash 服务返回 HTTP 402：请检查 Google AI Studio 项目的预付额度和计费状态。恢复额度后重发原链接；更换文章链接无法解决。':http?`Flash 服务返回 HTTP ${http}，请检查模型服务状态后重试。`:compiledStages.includes(job.stage)?'请检查本机受控编译记录及 Codex CLI 模型状态。':job.stage==='captured'?'Flash 名词处理失败，请检查本机任务记录及模型配置。':'请检查页面是否可访问，以及本机抓取任务记录。';
       job.receipt='【Wiki】处理未全部完成。\n'+progress+'\n'+reason;
      }
      job.status='delivery_pending';await save(file,job);
@@ -49,6 +51,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
  }
  return {
   async accept(c,url,signal){
+   checkScope(c);
    const messageId=c.MessageSidFull??c.MessageSid;if(!/^om_[\w-]+$/u.test(messageId??''))throw Error('Message ID required');
    const original=await feishu.getMessage(messageId,{signal});
    if(original.message_id!==messageId||original.chat_id!==c.NativeChannelId||original.sender?.id!==c.SenderId||original.sender.id_type!=='open_id'||original.sender.sender_type!=='user'||original.deleted)throw Error('Source mismatch');
@@ -57,9 +60,24 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
    const id=createHash('sha256').update(config.accountId+':'+messageId).digest('hex');const file=join(jobs,id+'.json');
    const temporary=file+'.'+randomUUID()+'.tmp';
    try{await writeFile(temporary,JSON.stringify({id,messageId,url,sender:c.SenderId,chat:c.NativeChannelId,status:'queued',createdAt:new Date().toISOString()}),{flag:'wx',mode:0o600});await link(temporary,file);}
-   catch(e){if(e.code==='EEXIST')return {duplicate:true};throw e;}
+   catch(e){if(e.code==='EEXIST')return {duplicate:true,jobId:id};throw e;}
    finally{await unlink(temporary).catch(e=>{if(e.code!=='ENOENT')throw e;});}
-   return {duplicate:false};
+   return {duplicate:false,jobId:id};
+  },
+  async acceptMessage(scope,messageId,signal){
+   checkScope(scope);
+   if(!/^om_[\w-]+$/u.test(messageId??''))throw Error('Message ID required');
+   const message=await feishu.getMessage(messageId,{signal});
+   const parsed=parseCommand(JSON.parse(message.body.content).text);
+   if(parsed?.action!=='record')throw Error('Source command mismatch');
+   return this.accept({...scope,MessageSid:messageId},parsed.url,signal);
+  },
+  async status(scope,id){
+   checkScope(scope);
+   if(!/^[a-f0-9]{64}$/u.test(id??''))throw Error('Job not found');
+   let job;try{job=JSON.parse(await readFile(join(jobs,id+'.json'),'utf8'));}catch(e){if(e.code==='ENOENT')throw Error('Job not found');throw e;}
+   if(job.sender!==scope.SenderId||job.chat!==scope.NativeChannelId)throw Error('Job not found');
+   return {jobId:id,status:job.status,stage:job.stage??'accepted',createdAt:job.createdAt,result:job.result??null,receiptConfirmed:Boolean(job.receiptId)};
   },
   async start(){timer=setInterval(()=>{processJobs().catch(()=>{});},2000);timer.unref();processJobs().catch(()=>{});},
   processJobs,

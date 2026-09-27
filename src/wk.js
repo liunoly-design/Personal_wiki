@@ -46,7 +46,7 @@ export async function recordArticle({url,vault,signal,onStage=async()=>{}},deps)
  signal?.throwIfAborted();
  const foundations=await Promise.all(terms.map(async t=>`### ${t.name}\n[基础解释](../../glossary/${t.slug}.md)\n\n${await readFile(join(dir,t.slug+'.md'),'utf8')}`));
  const context='以下基础解释已先行保存，为模型生成的通用知识，不代表作者观点。请在文章的概念/实体页引用对应基础页，另写本文用法、来源证据和关系；不要改写基础页。\n'+foundations.join('\n\n');
- const result=await deps.importAndCompile({capture,slug:analysis.slug,context,url,signal});
+ const result=await deps.importAndCompile({capture,slug:analysis.slug,context,url,signal,onStage});
  await onStage(result.status,{source:result.source});
  return {...result,newDefinitions:missing.length,terms:terms.length,attachmentStatus:capture.status??'complete'};
 }

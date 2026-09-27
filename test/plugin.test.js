@@ -4,7 +4,7 @@ import {createPlugin} from '../openclaw/index.js';import {openRuntime} from '../
 const scope={enabled:true,accountId:'default',entryAgentId:'xiaojie',allowedSenderIds:['ou_test'],allowedConversationIds:['oc_test']};
 const message={Provider:'feishu',AccountId:'default',AgentId:'xiaojie',SenderId:'ou_test',NativeChannelId:'oc_test',MessageSid:'om_test',rawText:'小婕 wk 记录：https://x.com/a/status/123'};
 test('hook reserves query, ignores GTD and unauthorized sender, does not process suppressed delivery',async()=>{
- let hook,calls=0;const replies=[];const api={pluginConfig:scope,config:{},logger:{warn(){}},registerService(){},on(n,f){hook=f;}};
+ let hook,calls=0;const replies=[];const api={pluginConfig:scope,config:{},logger:{warn(){}},registerService(){},registerTool(){},on(n,f){hook=f;}};
  const ctx={dispatcher:{sendFinalReply(p){replies.push(p.text);return true;},getQueuedCounts(){return{};}},recordProcessed(){},markIdle(){}};
  createPlugin({openRuntime:async()=>({accept:async()=>{calls++;return{duplicate:false};}})}).register(api);
  assert.equal(await hook({ctx:{...message,rawText:'小婕 GTD 收集：买菜'},sendPolicy:'allow'},ctx),undefined);

@@ -240,7 +240,12 @@ def commit(root, request):
         if root.optional(review_path) is None:
             root.immutable(review_path, encode(proposal))
         reviews.append(dict(id=review_id, file=str(root.path / review_path)))
-    result = dict(status='complete', source=str(root.path / expected), sourceId=record['id'],
+    source_text = next(b['content'] for b in blocks if b['path'] == expected)
+    heading = re.search(r'^#\s+(.+)$', source_text, re.M)
+    prose = re.sub(r'\A---\n.*?\n---\n', '', source_text, flags=re.S)
+    summary = next((p.strip() for p in prose.split('\n\n') if p.strip() and not p.lstrip().startswith(('#', '|', '```', '---'))), '')[:240]
+    result = dict(status='complete', title=heading.group(1) if heading else record['name'], summary=summary,
+                  source=str(root.path / expected), sourceId=record['id'],
                   archive=record['archive'], reviews=reviews, created=created)
     root.immutable(result_path, encode(result))
     return result

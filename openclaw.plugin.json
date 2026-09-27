@@ -58,6 +58,10 @@
       "compilerModel": {
         "type": "string",
         "default": "gpt-6-sol"
+      },
+      "wikiAgentId": {
+        "type": "string",
+        "default": "wiki"
       }
     },
     "allOf": [
@@ -84,6 +88,12 @@
           ]
         }
       }
+    ]
+  },
+  "contracts": {
+    "tools": [
+      "wiki_record",
+      "wiki_status"
     ]
   }
 }

@@ -15,7 +15,7 @@ export function store(request,{python='python3',signal}={}){
  });
 }
 async function optional(path){try{return await readFile(path,'utf8');}catch(e){if(e.code==='ENOENT')return '';throw e;}}
-export async function compileArchive({vault,record,context='',generate,python,signal}){
+export async function compileArchive({vault,record,context='',generate,python,signal,onStage=async()=>{}}){
  const directory=join(vault,'.personal-wiki/compilations',record.id);
  const saved=await optional(join(directory,'generation.json'));
  if(saved)return store(JSON.parse(saved),{python,signal});
@@ -23,12 +23,15 @@ export async function compileArchive({vault,record,context='',generate,python,si
  const original=await readFile(join(record.archive,'article.md'),'utf8');
  const [schema,purpose,index]=await Promise.all(['schema.md','purpose.md','wiki/index.md'].map(p=>optional(join(vault,p))));
  if(!generate)throw Error('Protected compiler model adapter is not configured; original archived');
+ await onStage('analyzing',{sourceId:record.id});
  const analysis=await generate({stage:'analysis',prompt:buildAnalysisPrompt(purpose,index,original,schema)+'\n\n## Source\n'+original+'\n\n## Processing context\n'+context,signal});
+ await onStage('generating',{sourceId:record.id});
  const generation=await generate({stage:'generation',prompt:buildGenerationPrompt(schema,purpose,index,record.name+'.md',undefined,original)+'\n\n## Source\n'+original+'\n\n## Analysis\n'+analysis+'\n\n## Processing context\n'+context+'\n\n本地提交约束：文件名使用英文小写连字符。本轮只输出 wiki/sources、wiki/concepts、wiki/entities、wiki/topics、wiki/synthesis 下的 Markdown 页及 wiki/log.md。每个主张保留来源和日期，冲突观点并列，不抹去旧观点。不得修改原件。',signal});
  const parsed=parseFileBlocks(generation);
  if(parsed.warnings.length||parsed.truncatedPaths.length||!parsed.blocks.length)throw Error('Incomplete or unsafe generated candidates; original archived');
  // The desktop normally handles log updates itself; its append-only log output
  // is not a knowledge page. Our commit journal records the actual operation.
  const blocks=parsed.blocks.filter(b=>b.path!=='wiki/log.md');
+ await onStage('committing',{sourceId:record.id});
  return store({operation:'commit',vault,sourceId:record.id,blocks,generation},{python,signal});
 }

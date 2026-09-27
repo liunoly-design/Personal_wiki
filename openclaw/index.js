@@ -1,11 +1,13 @@
 import {parseCommand} from '../src/wk.js';
 import {openRuntime as defaultOpenRuntime} from './runtime.js';
+import {registerWikiTools} from './tools.js';
 export function createPlugin({openRuntime=defaultOpenRuntime}={}){
  return {id:'personal-wiki',name:'Personal Wiki',register(api){
   const config=api.pluginConfig??{};if(config.enabled!==true)return;
   if(!config.allowedSenderIds?.length||!config.allowedConversationIds?.length||!config.accountId||!config.entryAgentId)throw Error('Wiki requires explicit Feishu scope');
   let pending;
   const runtime=()=>pending??=openRuntime({config,hostConfig:api.config});
+  registerWikiTools(api,config,runtime);
   api.registerService({id:'personal-wiki',async start(){await (await runtime()).start();},async stop(){if(pending)await (await pending).close();}});
   api.on('reply_dispatch',async(event,ctx)=>{
    const c=event.ctx;

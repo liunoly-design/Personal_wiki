@@ -31,10 +31,11 @@ export function createAdapters({vault,python,captureDirectory,flash,refresh=fals
    const {stdout}=await exec(python,[join(root,'scripts/capture_article.py'),'--url',url,'--output',captureDirectory],{signal,timeout:900000,maxBuffer:1024*1024});
    const receipt=JSON.parse(stdout);return {...receipt,text:await readFile(join(receipt.directory,'article.md'),'utf8')};
   },
-  async importAndCompile({capture,slug,context,url,signal}){
+  async importAndCompile({capture,slug,context,url,signal,onStage=async()=>{}}){
    const normalized=new URL(url);if(['x.com','twitter.com'].includes(normalized.hostname)){normalized.hostname='x.com';normalized.search='';normalized.pathname=normalized.pathname.replace(/\/$/u,'');}normalized.hash='';
    const record=await store({operation:'archive',vault,snapshot:capture.directory,slug,url:normalized.href,refresh},{python,signal});
-   return compileArchive({vault,record,context,generate,python,signal});
+   await onStage('archived',{sourceId:record.id,archive:record.archive});
+   return compileArchive({vault,record,context,generate,python,signal,onStage});
   },
  };
 }
