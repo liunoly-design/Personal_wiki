@@ -77,6 +77,16 @@ def select_target_article(soup, url):
     return leaves[0]
 
 
+def wechat_video_pending(metadata, html):
+    if metadata.get('videos'):
+        return True
+    soup=BeautifulSoup(html,'html.parser')
+    body=soup.select_one('#js_content') or soup
+    if body.select('video, iframe.video_iframe, iframe[data-vid], mp-common-videosnap'):
+        return True
+    return any('v.qq.com/' in (n.get('src','')+n.get('data-src','')) or 'video_player' in (n.get('src','')+n.get('data-src','')) for n in body.select('iframe'))
+
+
 def capture(url, output):
     out=Path(output);out.mkdir(parents=True,exist_ok=True)
     receipt=out/'capture-result.json'
@@ -97,7 +107,7 @@ def capture(url, output):
         images=metadata.get('images',[])+[metadata.get('cover_image'),metadata.get('share_cover_image')]
         missing=[x for x in images if x and (not x.get('local_path') or not (directory/x['local_path']).is_file())]
         html='\n'.join(p.read_text(errors='replace') for p in directory.glob('*.html'))
-        video_pending=bool(metadata.get('videos')) or any(marker in html for marker in ['<video', 'vid=', 'iframe class="video'])
+        video_pending=wechat_video_pending(metadata,html)
         result={'directory':str(directory.resolve()),'status':'partial' if missing or video_pending else 'complete','video_status':'waiting_for_supported_download' if video_pending else 'not_detected'}
     elif host in ['x.com','twitter.com']:
         directory=out/'package';directory.mkdir(exist_ok=True)

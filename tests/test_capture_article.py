@@ -51,3 +51,9 @@ class CaptureMediaTest(unittest.TestCase):
    body=(Path(result['directory'])/'article.md').read_text()
    self.assertLess(body.index('videos/video-01.mp4'),body.index('After the video'));self.assertIn('images/image-01.jpg',body);self.assertIn('videos/video-01.mp4',body)
    self.assertEqual((Path(result['directory'])/'videos/video-01.mp4').read_bytes(),sample.read_bytes())
+
+class WechatVideoTest(unittest.TestCase):
+ def test_script_templates_are_not_actual_pending_videos(self):
+  from scripts.capture_article import wechat_video_pending
+  self.assertFalse(wechat_video_pending({},'<script>for(i=0;i<videoPageInfos.length;i++){};player="?vid="</script><div id="js_content">Article</div>'))
+  self.assertTrue(wechat_video_pending({},'<div id="js_content"><iframe class="video_iframe" data-src="https://v.qq.com/iframe/player.html?vid=abc"></iframe></div>'))
