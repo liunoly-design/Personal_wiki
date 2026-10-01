@@ -39,7 +39,7 @@ class XContextTest(unittest.TestCase):
    result=capture('https://x.com/a/status/1',temp);manifest=Path(result['directory'])/'manifest.json';old=manifest.read_bytes();(Path(temp)/'capture-result.json').unlink()
    original=Path.replace
    def interrupted(path,target):
-    if Path(target)==manifest:raise OSError('synthetic interruption before rename')
+    if Path(target).resolve()==manifest.resolve():raise OSError('synthetic interruption before rename')
     return original(path,target)
    with patch.object(Path,'replace',interrupted):
     with self.assertRaises(OSError):capture('https://x.com/a/status/1',temp)
