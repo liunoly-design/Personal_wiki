@@ -2,7 +2,7 @@
 
 ## 当前部署
 
-2026-10-01：插件更新为 `0.3.0-preview.4`。新收集的完整文章发布到 `raw/sources/collected/`，已补齐 X 和微信两篇文章。见[原文可见性验证](research/source-publication-2026-10-01.md)。
+2026-10-01：插件已升级 **0.4.0-preview.2**。正式原文在 `raw/sources/`，来源卡与中文全文合并在 `wiki/sources/`；处理任务与临时文件移到 Vault 外。详见[本次迁移与部署](research/canonical-library-2026-10-01.md)。下文旧版记录仅供历史核对。
 
 2026-10-01：插件已更新为 `0.3.0-preview.3`，修复 X 大小写匹配、Wiki Flash 代理及微信视频误报。详见[修复与重跑记录](research/retry-2026-10-01.md)。
 

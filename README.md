@@ -1,10 +1,12 @@
 # 个人 Wiki / Personal Wiki
 
-独立项目；本机已部署 Personal Wiki 0.3.0-preview.4，提供名词解释、全文中文阅读、图片/公开 X 视频下载及忠实 Markdown 整理。
+本机已部署 Personal Wiki **0.4.0-preview.2**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
 
-完整文章现发布到 `raw/sources/collected/`，可在 nashsu「原始资料」查看；`raw/inputs/` 是内部编译输入，`wiki/sources/` 是派生来源卡。见[原文可见性修复与验证](docs/research/source-publication-2026-10-01.md)。
+- `raw/sources/`：原始文章；`raw/assets/`：图片、视频等原始附件。
+- `wiki/sources/`：来源卡与完整中文阅读正文；`wiki/concepts/`、`wiki/entities/`：概念与实体。
+- Agent 的任务和中间文件位于 Vault 外。通过 nashsu API 回读核验后清理；启动时恢复未完成任务。
 
-2026-09-27 安装结果：nashsu 0.6.11＋Codex CLI 已在独立 Vault 中生成两份样本的来源卡、概念和实体。见[运行说明](docs/nashsu-local.md)及[实测报告](docs/research/nashsu-install-test-2026-09-27.md)。飞书记录插件已更新至 0.3.0-preview.4，299 份旧名词页已更新；见[本次部署与验证](docs/research/deploy-2026-09-28.md)。新版真实飞书入站验收仍待用户测试，完整规格见 [Issue #1](https://github.com/liunoly-design/Personal_wiki/issues/1)。
+本次迁移、实测与限制见[0.4 部署记录](docs/research/canonical-library-2026-10-01.md)。原有 `reading`、`raw/inputs`、`raw/sources/collected`、`glossary` 已迁入正式目录。
 
 可用入口和验收范围见[当前用例清单](docs/current-capabilities.md)。
 
@@ -30,6 +32,6 @@
 
 ## 飞书 Wiki 插件
 
-已安装 `小婕 wk 记录：链接` 插件到本机 OpenClaw；先用 Gemini Flash 保存名词基础解释，再交给 nashsu 分析文章关联。安装命令、模型费用和当前限制见 [飞书 Wiki 入口](docs/openclaw-wiki.md)。查询与讨论暂时预留。安装与本地检查通过，真实飞书端到端验收仍待用户发送测试消息，见 [安装记录](docs/research/openclaw-install-2026-09-27.md)。
+已安装 `小婕 wk 记录：链接` 插件到本机 OpenClaw；Agent 完成抓取、全文翻译、文章分析和名词解释，经受保护写入层发布，再用 nashsu API 核验。安装命令、模型费用和当前限制见 [飞书 Wiki 入口](docs/openclaw-wiki.md)。查询与讨论暂时预留。安装与本地检查通过，真实飞书端到端验收仍待用户发送测试消息，见 [安装记录](docs/research/openclaw-install-2026-09-27.md)。
 
 2026-10-01 修复 X 作者名大小写匹配与 Flash 代理连接，微信脚本模板不再被误判为待下载视频。详见[重跑记录](docs/research/retry-2026-10-01.md)。
