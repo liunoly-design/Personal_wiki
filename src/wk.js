@@ -3,27 +3,27 @@ import {join} from 'node:path';
 
 export function parseCommand(text) {
  if(typeof text!=='string')return null;
- const match=text.match(/^小婕\s*(?:(?:wk\s+(记录|查询|讨论))|(重新收集|收集))\s*[：:]?\s*([\s\S]*)$/iu);
+ const match=text.match(/^小婕[ \t]*(?:(?:wk[ \t]+(记录|查询|讨论))|(重新收集|收集))([ \t]*[：:]|[ \t]|(?=\n|https?:\/\/|$))([\s\S]*)$/iu);
  if(!match)return /^小婕\s+wk(?:\s|[：:])/iu.test(text)?{action:'invalid'}:null;
  if(['查询','讨论'].includes(match[1]))return {action:'reserved',mode:match[1]};
- let body=match[3],refresh=match[2]==='重新收集';
+ let body=match[4],refresh=match[2]==='重新收集';
  if(/^重新收集\s*[：:]?/u.test(body)){refresh=true;body=body.replace(/^重新收集\s*[：:]?\s*/u,'');}
  const split=body.match(/(?:^|\n)\s*(?:备注|背景|个人备注|个人背景)\s*[：:]([\s\S]*)$/u);
  let background=split?.[1].trim()??'';
  if(split)body=body.slice(0,split.index);
  const urls=[...body.matchAll(/https?:\/\/[^\s<>，。；]+/gu)].map(m=>m[0]);
  if(urls.length){
-  try{for(const url of urls){const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||(u.port&&u.port!=='443'))throw Error();}}catch{return {action:'invalid'};}
+  const items=urls.map(url=>{try{const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||(u.port&&u.port!=='443'))throw Error();return {url};}catch{return {inputError:'Unsupported source URL'};}});
   const extra=body.replace(/https?:\/\/[^\s<>，。；]+/gu,'').replace(/^[\s：:,，;；]+|[\s：:,，;；]+$/gu,'');
   background=[extra,background].filter(Boolean).join('\n');
-  if(urls.length===1&&!background&&!refresh)return {action:'record',url:urls[0]};
-  return {action:'record',url:urls[0],items:urls.map(url=>({url})),background,refresh};
+  if(urls.length===1&&items[0].url&&!background&&!refresh)return {action:'record',url:urls[0]};
+  return {action:'record',url:items[0].url,items,background,refresh};
  }
  if(!body.trim())return {action:'invalid'};
  return {action:'record',items:[{text:body}],background,refresh};
 }
 export const validSlug=s=>typeof s==='string'&&s.length<=100&&/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(s);
-export async function recordArticle({url,vault,signal,onStage=async()=>{}},deps){
+export async function recordArticle({url,vault,signal,sourceContext='',onStage=async()=>{}},deps){
  signal?.throwIfAborted();
  const existing=await deps.lookupExisting?.(url,signal);
  if(existing)return {...existing,terms:0,newDefinitions:0,attachmentStatus:"previous_archive"};
@@ -56,7 +56,7 @@ export async function recordArticle({url,vault,signal,onStage=async()=>{}},deps)
  await onStage('glossary_saved',{terms:terms.map(t=>t.slug),newDefinitions:missing.length});
  signal?.throwIfAborted();
  const foundations=await Promise.all(terms.map(async t=>`### ${t.name}\n[基础解释](../../glossary/${t.slug}.md)\n\n${await readFile(join(dir,t.slug+'.md'),'utf8')}`));
- const context='以下基础解释已先行保存，为模型生成的通用知识，不代表作者观点。请在文章的概念/实体页引用对应基础页，另写本文用法、来源证据和关系；不要改写基础页。\n'+foundations.join('\n\n');
+ const context=sourceContext+'\n以下基础解释已先行保存，为模型生成的通用知识，不代表作者观点。请在文章的概念/实体页引用对应基础页，另写本文用法、来源证据和关系；不要改写基础页。\n'+foundations.join('\n\n');
  const result=await deps.importAndCompile({capture,slug:analysis.slug,context,url,signal,onStage});
  await onStage(result.status,{source:result.source});
  return {...result,newDefinitions:missing.length,terms:terms.length,attachmentStatus:capture.status??'complete'};

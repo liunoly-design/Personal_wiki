@@ -12,6 +12,7 @@ export async function acquireQueueLease(directory,python){
  return async()=>{await new Promise(resolve=>{child.once('exit',resolve);child.stdin.end();});};
 }
 function waitingReason(message,attempts){
+ if(/Unsupported source URL/iu.test(message))return 'waiting_input';
  if(/402|quota|capacity|额度/iu.test(message))return 'waiting_capacity';
  if(/401|403|login|captcha|验证码|登录/iu.test(message))return 'waiting_login';
  if(/Article extraction incomplete|extraction requires review/iu.test(message))return 'waiting_extraction';

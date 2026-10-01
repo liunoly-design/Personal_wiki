@@ -17,7 +17,7 @@ def public_addresses(url):
     if u.scheme != 'https' or not u.hostname or u.username or u.password or u.port not in (None, 443):
         raise ValueError('Only public HTTPS URLs without credentials are supported')
     addresses = sorted({entry[4][0] for entry in socket.getaddrinfo(u.hostname, 443, type=socket.SOCK_STREAM)})
-    if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
+    if not addresses or any((not ipaddress.ip_address(address).is_global or ipaddress.ip_address(address).is_multicast) for address in addresses):
         raise ValueError('Private or non-public address rejected')
     return u, addresses
 

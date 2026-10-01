@@ -14,7 +14,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
  const allowed=job=>config.allowedSenderIds.includes(job.sender)&&config.allowedConversationIds.includes(job.chat);
  function check(scope){if(scope.Provider!=='feishu'||scope.AccountId!==config.accountId||!allowed({sender:scope.SenderId,chat:scope.NativeChannelId}))throw Error('Wiki scope denied');}
  const queue=await openTaskQueue({stateDir:config.stateDir,python:config.python,allowed,
-  run:(job,workspace,signal,onStage,previousResult)=>collect({url:job.url,text:job.text,background:job.background,requestId:job.id,refresh:job.refresh,vault:config.vault,workspace,python:config.python,flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel,signal,onStage,previousResult}),
+  run:(job,workspace,signal,onStage,previousResult)=>collect({url:job.url,text:job.text,inputError:job.inputError,background:job.background,requestId:job.id,refresh:job.refresh,vault:config.vault,workspace,python:config.python,flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel,signal,onStage,previousResult}),
   notifyWaiting:async(job,signal)=>{
    const reply=await feishu.reply({replyTo:job.messageId,text:`【Wiki】本项尚未完成：${job.url}\n状态：${job.status}。已取得的资料及任务保留，可在外部条件恢复后重试。其他项独立处理。`,uuid:createHash('sha256').update(job.id+':waiting').digest('hex').slice(0,32)},{signal});
    if(!reply?.message_id||reply.chat_id!==job.chat)throw Error('Delivery result unknown');return reply.message_id;
@@ -33,9 +33,9 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
    if(parsed?.action!=='record'||(expectedURL&&parsed.url!==expectedURL))throw Error('Source command mismatch');
    const items=parsed.items??[{url:parsed.url}],jobs=[];
    for(const [index,item] of items.entries()){
-    const url=item.url??'https://text.personal-wiki.invalid/'+createHash('sha256').update(item.text).digest('hex');
+    const url=item.url??'https://'+(item.inputError?'invalid':'text')+'.personal-wiki.invalid/'+createHash('sha256').update(item.text??('invalid-'+id+'-'+index)).digest('hex');
     const taskId=createHash('sha256').update(config.accountId+':'+id+(index?':'+index:'')).digest('hex');
-    jobs.push(await queue.enqueue({id:taskId,messageId:id,url,...(item.text!==undefined?{text:item.text}:{}),background:parsed.background??'',refresh:parsed.refresh===true,sender:scope.SenderId,chat:scope.NativeChannelId}));
+    jobs.push(await queue.enqueue({id:taskId,messageId:id,url,itemIndex:index+1,...(item.inputError?{inputError:item.inputError}:{}),...(item.text!==undefined?{text:item.text}:{}),background:parsed.background??'',refresh:parsed.refresh===true,sender:scope.SenderId,chat:scope.NativeChannelId}));
    }
    return {...jobs[0],duplicate:jobs.every(j=>j.duplicate),jobs};
   },

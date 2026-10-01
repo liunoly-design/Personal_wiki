@@ -56,7 +56,8 @@ def publish(request):
                     number += 1
                 name = f'{slug}--{number}'
             raw = rewrite_attachments(staging.read(f'raw/assets/{sid}/article.md').decode(), record, '../..')
-            raw = raw.rstrip() + f'\n\n[原始网页]({record["url"]})\n'
+            origin = '用户粘贴文本（本机内容标识，不是网页出处）' if record['url'].startswith('https://text.personal-wiki.invalid/') else f'[原始网页]({record["url"]})'
+            raw = raw.rstrip() + f'\n\n{origin}\n'
             reading = staging.read(f'reading/{slug}.zh.md').decode()
             reading = re.sub(r'^---\n.*?\n---\n', '', reading, count=1, flags=re.S)
             reading = reading.replace('../raw/assets/', '../../raw/assets/')

@@ -237,7 +237,8 @@ def commit(root, request):
     for b in blocks:
         path = b['path']
         reference = f"../../raw/assets/{record['id']}/article.md"
-        body = b['content'].rstrip() + f"\n\n## 加工来源\n\n[原始提取稿]({reference}) · {record['url']}\n\n来源 ID：{record['id']}；采集时间：{record['imported_at']}\n"
+        origin = '用户粘贴文本（本机内容标识，不是网页出处）' if record['url'].startswith('https://text.personal-wiki.invalid/') else record['url']
+        body = b['content'].rstrip() + f"\n\n## 加工来源\n\n[原始提取稿]({reference}) · {origin}\n\n来源 ID：{record['id']}；采集时间：{record['imported_at']}\n"
         body = rewrite_attachments(body, record, '../..')
         candidate = body.encode()
         history = job + '/candidates/' + path
