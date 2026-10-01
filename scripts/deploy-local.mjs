@@ -10,7 +10,7 @@ const state=entry.config.stateDir;
 const nashsuState=JSON.parse(await readFile(join(home,'Library/Application Support/com.llmwiki.app/app-state.json'),'utf8'));
 const project=Object.entries(nashsuState.projectRegistry??{}).find(([,p])=>p.path===entry.config.vault)?.[0];
 if(!project||nashsuState.sourceWatchConfig?.[project]?.autoIngest!==false)throw Error('Disable duplicate automatic ingestion before deploying canonical library');
-for(const name of await readdir(join(state,'tasks')).catch(e=>{if(e.code==='ENOENT')return [];throw e;})){if(!name.endsWith('.json'))continue;const j=JSON.parse(await readFile(join(state,'tasks',name),'utf8'));if(['queued','processing','delivery_pending'].includes(j.status))throw Error('Wait for active Wiki jobs before deploying');}
+for(const name of await readdir(join(state,'tasks')).catch(e=>{if(e.code==='ENOENT')return [];throw e;})){if(!name.endsWith('.json'))continue;const j=JSON.parse(await readFile(join(state,'tasks',name),'utf8'));if(['queued','retry','processing','cleanup_pending','delivery_pending'].includes(j.status))throw Error('Wait for active Wiki jobs before deploying');}
 const codex='/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';await access(codex);
 execFileSync(entry.config.python,['-c','import httpx, bs4, markdownify, readability, yt_dlp, imageio_ffmpeg'],{stdio:'ignore'});
 const release=join(state,'releases',packageInfo.version);

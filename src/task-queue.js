@@ -33,7 +33,7 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
   if(!task.refresh&&linked?.jobId){const owner=await status(linked.jobId);if(owner?.status?.startsWith('waiting_')&&owner.sender===task.sender&&owner.chat===task.chat)return{duplicate:true,jobId:owner.id};}
   const job={...task,url:canonicalURL(task.url),status:'queued',stage:'accepted',createdAt:task.createdAt??new Date(now()).toISOString(),attempts:0};
   await saveJSON(join(work,job.id,'task.json'),job);await saveJSON(join(active,job.id+'.json'),job);
-  if(running)await schedule();
+  if(running)void schedule();
   return{duplicate:false,jobId:job.id};
  }
  async function cleanup(job){
@@ -70,15 +70,16 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
    if(job.status!=='cleanup_pending'&&job.status!=='delivery_pending'){
     const workspaceInfo=await lstat(join(work,job.id)).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
     if(workspaceInfo?.isSymbolicLink())throw Error('Refusing symlink workspace');
-    job.status='processing';await saveJSON(file,job);
+    job.status='processing';job.attempts=(job.attempts??0)+1;await saveJSON(file,job);
     const known=await optionalJSON(join(stateDir,'sources',urlKey(job.url)+'.json'));
     job.result=await run(job,join(work,job.id),controller.signal,async(stage,details={})=>{job.stage=stage;job.details={...job.details,...details};await saveJSON(file,job);},known?.result);
     if(job.result.status==='partial'&&job.result.resumableMedia){
      const {userRecord,...sourceResult}=job.result;
      await saveJSON(join(stateDir,'sources',urlKey(job.url)+'.json'),{url:job.url,jobId:job.id,result:sourceResult});
-     job.status=job.result.missingAssets?.some(a=>a.status==='waiting_confirmation')?'waiting_confirmation':'waiting_media';
-     job.failure='正文已核验；附件尚未完成';delete job.mediaAction;await saveJSON(file,job);
-     if(notifyWaiting&&!job.silent&&!job.waitingReceiptId){job.waitingReceiptId=await notifyWaiting(job,controller.signal);await saveJSON(file,job);}
+     job.mediaActions=(job.mediaActions??[]).slice(1);job.mediaAction=job.mediaActions[0];
+     job.status=job.mediaAction?'queued':job.result.missingAssets?.some(a=>a.status==='waiting_login')?'waiting_login':job.result.missingAssets?.some(a=>a.status==='waiting_confirmation')?'waiting_confirmation':'waiting_media';
+     job.failure='正文已核验；附件尚未完成';await saveJSON(file,job);
+     if(job.status.startsWith('waiting_')&&notifyWaiting&&!job.silent&&!job.waitingReceiptId){job.waitingReceiptId=await notifyWaiting(job,controller.signal);await saveJSON(file,job);}
      return;
     }
     if(job.result.status!=='complete')throw Error('Result incomplete; retain work');
@@ -91,9 +92,9 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
    job.status='done';job.completedAt=new Date(now()).toISOString();delete job.details;delete job.nextAttemptAt;
    await saveJSON(join(complete,name),job);await unlink(file);
   }catch(error){
-   if(closed){if(!['cleanup_pending','delivery_pending'].includes(job.status))job.status='queued';job.nextAttemptAt=0;}
+   if(closed){if(!['cleanup_pending','delivery_pending'].includes(job.status))job.status=(job.attempts??0)>=5?'waiting_retry':'queued';job.nextAttemptAt=0;}
    else{
-    job.failure=error.message;job.attempts=(job.attempts??0)+1;
+    job.failure=error.message;if(job.status!=='processing')job.attempts=(job.attempts??0)+1;
     const phase=job.status;
     job.status=waitingReason(error.message,job.attempts);
     if(['cleanup_pending','delivery_pending'].includes(phase)){job.resumePhase=phase;if(job.status==='retry')job.status=phase;}
@@ -105,7 +106,7 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
    }
   }
  }
- async function schedule(){
+ async function scheduleNow(){
   if(scheduling||closed)return;scheduling=true;
   try{
    for(const name of (await readdir(active)).filter(n=>/^[a-f0-9]{64}\.json$/u.test(n)).sort()){
@@ -119,6 +120,8 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
    }
   }finally{scheduling=false;}
  }
+ function serialize(fn){const result=ingress.then(fn);ingress=result.catch(()=>{});return result;}
+ const schedule=()=>serialize(scheduleNow);
  async function drain(){
   if(closed)return;
   if(running){await schedule();return;}
@@ -134,15 +137,16 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
  }
  await recover(true);
  return{enqueue:task=>{const result=ingress.then(()=>enqueue(task));ingress=result.catch(()=>{});return result;},status,drain,recover,
-  async retry(id,changes={}){
+  retry(id,changes={}){return serialize(async()=>{
    if(!valid(id))throw Error('Invalid task ID');if(inFlight.has(id+'.json'))throw Error('Task is still processing');
    const job=await optionalJSON(join(active,id+'.json'));if(!job)throw Error('No active task');
    if(changes.controlMessageId&&job.controlMessages?.includes(changes.controlMessageId))return;
    if(job.status==='waiting_confirmation'&&!changes.mediaAction)throw Error('Exact video confirmation or attachment selection required');
-   Object.assign(job,changes);job.controlMessages=[...(job.controlMessages??[]),...(changes.controlMessageId?[changes.controlMessageId]:[])];
+   const actions=[...(job.mediaActions??[]),...(changes.mediaAction?[changes.mediaAction]:[])];
+   Object.assign(job,changes);job.mediaActions=actions;job.mediaAction=actions[0];job.controlMessages=[...(job.controlMessages??[]),...(changes.controlMessageId?[changes.controlMessageId]:[])];
    job.status=job.resumePhase??'queued';job.attempts=0;job.nextAttemptAt=0;delete job.waitingReceiptId;
    await saveJSON(join(active,id+'.json'),job);
-  },
+  });},
   async start(){timer=setInterval(()=>{drain().catch(()=>{});},2000);timer.unref();void drain().catch(()=>{});},
   async close(){if(closed)return;closed=true;clearInterval(timer);controller.abort();await ingress;while(running)await new Promise(resolve=>setTimeout(resolve,25));await release();}
  };

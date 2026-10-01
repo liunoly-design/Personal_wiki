@@ -13,7 +13,7 @@ class XContextTest(unittest.TestCase):
    if url in pages:dest.write_text(pages[url])
    elif 'pbs.twimg.com' in url:dest.write_bytes(b'image')
    else:raise ValueError('missing')
-  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request):
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request),patch('scripts.attachment_resume.download',side_effect=lambda url,dest,**kwargs:request(url,set(),0,dest)):
    result=capture('https://x.com/a/status/1',temp);directory=Path(result['directory']);body=(directory/'article.md').read_text();manifest=json.loads((directory/'manifest.json').read_text())
    self.assertLess(body.index('首帖'),body.index('第二帖'));self.assertLess(body.index('第二帖'),body.index('第三帖'))
    self.assertIn('远端引用正文',body);self.assertNotIn('他人评论',body);self.assertNotIn('无关同作者',body);self.assertEqual(body.count('第二帖'),1)
@@ -23,6 +23,12 @@ class XContextTest(unittest.TestCase):
   def request(url,hosts,limit,dest):
    if url=='https://x.com/a/status/1':dest.write_text(html)
    else:raise ValueError('HTTP 404')
-  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request):
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request),patch('scripts.attachment_resume.download',side_effect=lambda url,dest,**kwargs:request(url,set(),0,dest)):
    result=capture('https://x.com/a/status/1',temp);body=(Path(result['directory'])/'article.md').read_text()
    self.assertIn('上下文缺失',body);self.assertEqual(result['contextStatus'],'partial')
+
+ def test_video_metadata_does_not_hide_same_author_thread(self):
+  html='<article data-reply-to=""><a href="/a/status/1">post</a><p>首帖</p><video></video></article><article data-reply-to="1"><a href="/a/status/2">post</a><p>后续帖</p></article>'
+  def request(url,hosts,limit,dest):dest.write_text(html)
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request),patch('scripts.capture_article.extract_public',return_value={'duration':1900,'formats':[dict(url='https://video.twimg.com/long.mp4',ext='mp4',width=1920,height=1080,vcodec='h264')]}):
+   result=capture('https://x.com/a/status/1',temp);self.assertIn('后续帖',(Path(result['directory'])/'article.md').read_text())

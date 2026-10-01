@@ -65,7 +65,9 @@ def download(url,dest,limit=LIMIT,approved=False):
             if validator and validator.startswith('W/'):validator=None
             if offset and response.status==206:
                 match=re.fullmatch(r'bytes (\d+)-(\d+)/(\d+|\*)',response.getheader('Content-Range') or '')
-                if not match or int(match[1])!=offset or validator!=old['validator']:raise ValueError('Unsafe partial response; validator/range changed')
+                if not match or int(match[1])!=offset or validator!=old['validator']:
+                    progress.unlink(missing_ok=True)
+                    raise ValueError('Unsafe partial response; validator/range changed; next attempt restarts this attachment')
             elif response.status==206:raise ValueError('Unexpected partial response')
             else:offset=0
             length=int(response.getheader('Content-Length') or 0)
@@ -97,7 +99,7 @@ def verify_video(dest,approved):
     if seconds>1800 and not approved:raise ConfirmationRequired('Video exceeds 30 minutes; confirmation required')
 
 
-def resume_assets(directory,selected=None,approvals=None,initial=False):
+def resume_assets(directory,selected=None,approvals=None,initial=False,browser_profile=None):
     directory=Path(directory);path=directory/'manifest.json';manifest=json.loads(path.read_text());assets=[];approvals=approvals or {}
     for original in manifest['assets']:
         a=identify(original,manifest['source_url']);assets.append(a)
@@ -108,6 +110,31 @@ def resume_assets(directory,selected=None,approvals=None,initial=False):
         if selected and selected!=a['id']:continue
         if a.get('attempts',0)>=5 and not initial:
             a['status']='waiting_retry';continue
+        if a['kind']=='video' and (not a.get('duration') or not a.get('width') or not a.get('height')) and not initial:
+            try:
+                try:
+                    from .media_download import extract_public, video_assets, direct_video_asset
+                except ImportError:
+                    from media_download import extract_public, video_assets, direct_video_asset
+                a['metadataAttempts']=a.get('metadataAttempts',0)+1
+                atomic_json(path,{**manifest,'assets':assets+manifest['assets'][len(assets):]})
+                origin=a.get('post_url') or manifest['source_url']
+                if browser_profile and '/status/' in origin:
+                    try:
+                        from .browser_session import browser_html
+                        from .x_context import parse_posts, post_url
+                    except ImportError:
+                        from browser_session import browser_html
+                        from x_context import parse_posts, post_url
+                    from bs4 import BeautifulSoup
+                    posts=parse_posts(BeautifulSoup(browser_html(origin,browser_profile),'html.parser'))
+                    html=posts.get(post_url(origin),{}).get('html','');nodes=BeautifulSoup(html,'html.parser').select('video')
+                    node=nodes[a.get('video_index',0)]
+                    metadata=dict(kind='video',url=node.get('src'),duration=float(node.get('data-duration',0)),width=int(node.get('data-width',0)),height=int(node.get('data-height',0)))
+                else:metadata=video_assets(extract_public(origin))[a.get('video_index',0)] if '/status/' in origin else direct_video_asset(a['url'])
+                a.update(metadata);a.update(identify(a,manifest['source_url']))
+            except Exception as error:
+                a.update(status='waiting_login' if 'login' in str(error) or 'captcha' in str(error) else 'waiting_metadata',error=str(error));continue
         approval=approvals.get(a['id'],{});approved=approval.get('fingerprint')==a['fingerprint']
         if a['kind']=='video':
             if not a.get('duration') or not a.get('width') or not a.get('height') or min(a['width'],a['height'])>1080:
@@ -118,6 +145,7 @@ def resume_assets(directory,selected=None,approvals=None,initial=False):
             dest=safe_destination(directory,a['path'])
             # A selected explicit recovery starts a new bounded cycle, via reset_attempts.
             a['attempts']=a.get('attempts',0)+1
+            atomic_json(path,{**manifest,'assets':assets+manifest['assets'][len(assets):]})
             download(a['url'],dest,limit=LIMIT if a['kind']=='video' else 30000000,approved=approved if a['kind']=='video' else False)
             if a['kind']=='video':verify_video(dest,approved)
             a.update(status='downloaded',sha256=hashlib.sha256(dest.read_bytes()).hexdigest());a.pop('error',None)
@@ -125,17 +153,18 @@ def resume_assets(directory,selected=None,approvals=None,initial=False):
             a.update(status='waiting_confirmation',limitReached=True,error=str(error))
             # A post-download probe can discover duration; retain bytes privately.
             if 'dest' in locals() and dest.exists():dest.replace(dest.with_suffix(dest.suffix+'.part'))
-        except Exception as error:a.update(status='failed',error=str(error))
+        except Exception as error:
+            a.update(status='waiting_login' if 'login' in str(error) or 'captcha' in str(error) else 'failed',error=str(error))
         atomic_json(path,{**manifest,'assets':assets+manifest['assets'][len(assets):]})
     manifest['assets']=assets;atomic_json(path,manifest)
     missing=[a for a in assets if a.get('status')!='downloaded']
     return dict(directory=str(directory.resolve()),status='partial' if missing else 'complete',resumableMedia=True,missingAssets=missing,assets=assets)
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--directory',required=True);parser.add_argument('--asset');parser.add_argument('--approvals');parser.add_argument('--cycle');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--directory',required=True);parser.add_argument('--asset');parser.add_argument('--approvals');parser.add_argument('--cycle');parser.add_argument('--browser-profile');args=parser.parse_args()
     if args.cycle:
         path=Path(args.directory)/'manifest.json';m=json.loads(path.read_text())
         for a in m['assets']:
             if identify(a,m['source_url'])['id']==args.asset and a.get('cycle')!=args.cycle:a['attempts']=0;a['cycle']=args.cycle
         atomic_json(path,m)
-    print(json.dumps(resume_assets(args.directory,args.asset,json.loads(Path(args.approvals).read_text()) if args.approvals else {}),ensure_ascii=False))
+    print(json.dumps(resume_assets(args.directory,args.asset,json.loads(Path(args.approvals).read_text()) if args.approvals else {},browser_profile=args.browser_profile),ensure_ascii=False))

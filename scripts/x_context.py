@@ -46,7 +46,10 @@ def parse_posts(soup):
                         if media.get('type')=='photo':
                             img=body.new_tag('img',src=media.get('media_url_https',''));body.article.append(img)
                         elif media.get('type') in ('video','animated_gif'):
-                            node=body.new_tag('video');body.article.append(node)
+                            variants=[v for v in media.get('video_info',{}).get('variants',[]) if v.get('content_type')=='video/mp4']
+                            node=body.new_tag('video',src=max(variants,key=lambda v:v.get('bitrate',0)).get('url','') if variants else '')
+                            node['data-duration']=str(media.get('video_info',{}).get('duration_millis',0)/1000)
+                            sizes=media.get('original_info',{});node['data-width']=str(sizes.get('width',0));node['data-height']=str(sizes.get('height',0));body.article.append(node)
                     quoted=value.get('quoted_status_result',{}).get('result',{})
                     quser=quoted.get('core',{}).get('user_results',{}).get('result',{})
                     qname=quser.get('legacy',{}).get('screen_name') or quser.get('core',{}).get('screen_name')
@@ -99,7 +102,9 @@ def collect_context(url,directory,fetch,initial_soup=None):
         found=next((p for p,v in posts.items() if v['id']==parent and v['author']==author),None)
         if not found:
             candidate=f'https://x.com/{author}/status/{parent}';raw=directory/f'ancestor-{parent}.html'
-            try:fetch(candidate,raw);posts.update(parse_posts(BeautifulSoup(raw.read_bytes(),'html.parser')))
+            try:
+                if not raw.exists():fetch(candidate,raw)
+                posts.update(parse_posts(BeautifulSoup(raw.read_bytes(),'html.parser')))
             except Exception:gaps.append(f'父帖不可读取：{candidate}');break
             found=next((p for p,v in posts.items() if v['id']==parent and v['author']==author),None)
         if not found:gaps.append('父帖作者或正文不可验证');break

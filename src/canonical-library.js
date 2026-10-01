@@ -37,7 +37,7 @@ export async function collectCanonical(options){
  const {url,vault,workspace,python,signal,onStage=async()=>{}}=options;
  await mkdir(workspace,{recursive:true,mode:0o700});
  const staging=join(workspace,'staging');await mkdir(staging,{recursive:true,mode:0o700});
- const api=options.api??await localNashsuAPI(vault,{signal});
+ const api=options.api??await localNashsuAPI(vault,{signal,maxAttempts:1});
  const pendingPublication=await optionalJSON(join(workspace,'published.json'));
  const saved=pendingPublication??(!options.refresh?options.previousResult:null);
  const verifyReuse=async result=>{await verifyPublication({...result,files:Object.fromEntries(Object.entries(result.files).filter(([path])=>path.startsWith('raw/')))},{vault,api});await api.read('wiki/sources/'+result.source.split('/').at(-1));};
@@ -46,7 +46,7 @@ export async function collectCanonical(options){
   await verifyPublication(pendingPublication,{vault,api});
   const directory=pendingPublication?.captureDirectory??join(workspace,'capture','package');
   const approvalsPath=join(workspace,'media-approvals.json');await saveJSON(approvalsPath,options.mediaApprovals??{});
-  const resumed=options.resumeAttachments?await options.resumeAttachments({directory,...options.mediaAction,approvals:options.mediaApprovals??{},signal}):JSON.parse((await exec(python,[resolve(import.meta.dirname,'../scripts/attachment_resume.py'),'--directory',directory,'--asset',options.mediaAction.assetId,'--approvals',approvalsPath,...(options.mediaAction.resetAttempts?['--cycle',options.mediaAction.cycle??'direct']:[])],{signal,timeout:900000,maxBuffer:1024*1024})).stdout);
+  const resumed=options.resumeAttachments?await options.resumeAttachments({directory,...options.mediaAction,approvals:options.mediaApprovals??{},signal}):JSON.parse((await exec(python,[resolve(import.meta.dirname,'../scripts/attachment_resume.py'),'--directory',directory,'--asset',options.mediaAction.assetId,'--approvals',approvalsPath,...(options.browserProfile?['--browser-profile',options.browserProfile]:[]),...(options.mediaAction.resetAttempts?['--cycle',options.mediaAction.cycle??'direct']:[])],{signal,timeout:900000,maxBuffer:1024*1024})).stdout);
   const supplements=[...(pendingPublication.supplements??[])];
   for(const asset of resumed.assets??[]){
    if(asset.status!=='downloaded'||!pendingPublication.missingAssets?.some(a=>a.id===asset.id))continue;

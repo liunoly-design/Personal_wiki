@@ -139,15 +139,16 @@ def capture(url, output, browser_profile=None):
     elif host in ['x.com','twitter.com']:
         directory=out/'package';directory.mkdir(exist_ok=True)
         raw=directory/'raw.html'
-        media_info=None
+        media_info=None;html_available=False
         try:
-            session_request(url,{'x.com','www.x.com','twitter.com','www.twitter.com'},8*1024*1024,raw)
+            if not (directory/'raw-valid.json').exists():session_request(url,{'x.com','www.x.com','twitter.com','www.twitter.com'},8*1024*1024,raw)
             soup=BeautifulSoup(raw.read_text(),'html.parser')
             if soup.select('input[type="password"], #captcha, [data-testid="LoginForm"]'):raise ValueError('login/captcha required')
-            article=select_target_article(soup,url)
+            article=select_target_article(soup,url);html_available=True
+            (directory/'raw-valid.json').write_text(json.dumps({'url':url}))
         except (ValueError, OSError, http.client.HTTPException, httpx.HTTPError) as error:
             if any(word in str(error).lower() for word in ('401','403','captcha')):raise
-            media_info=extract_public(url)
+            media_info=json.loads((directory/'extractor.json').read_text()) if (directory/'extractor.json').exists() else extract_public(url)
             (directory/'extractor.json').write_text(json.dumps(media_info,ensure_ascii=False,indent=2))
             description=media_info.get('description')
             if not description:
@@ -166,7 +167,7 @@ def capture(url, output, browser_profile=None):
             from .x_context import collect_context
         except ImportError:
             from x_context import collect_context
-        if media_info is None:
+        if html_available:
             context=collect_context(url,directory,lambda u,p:session_request(u,{'x.com','www.x.com','twitter.com','www.twitter.com'},8*1024*1024,p),soup)
             soup=BeautifulSoup('<article></article>','html.parser');article=soup.article
             for post in context['posts']:
@@ -196,7 +197,8 @@ def capture(url, output, browser_profile=None):
             except (ValueError,OSError,subprocess.TimeoutExpired):
                 try:videos=[direct_video_asset(source)]
                 except Exception:videos=[{'kind':'video','status':'waiting_metadata','error':'Public video metadata unavailable','url':source or post}]
-            for item in videos:
+            for video_index,item in enumerate(videos):
+                item['video_index']=video_index
                 item['path']='videos/video-%02d.mp4'%(1+sum(a['kind']=='video' for a in assets));item['post_url']=post
                 assets.append(item)
                 anchor=soup.new_tag('a',href=item.get('url',post));anchor.string='视频（不转录）';node.insert_before(anchor)
@@ -210,31 +212,23 @@ def capture(url, output, browser_profile=None):
         except ImportError:
             from attachment_resume import identify
         assets=[identify(a,url) for a in assets]
+        try:
+            from .attachment_resume import resume_assets
+        except ImportError:
+            from attachment_resume import resume_assets
+        manifest=directory/'manifest.json'
+        prior=json.loads(manifest.read_text()).get('assets',[]) if manifest.exists() else []
         for a in assets:
-            if a.get('status') in ('waiting','waiting_metadata'):
-                if a.get('duration') and a.get('width') and a.get('height') and min(a['width'],a['height'])<=1080:a['status']='waiting_confirmation'
-                else:a['status']='waiting_metadata'
-                continue
-            dest=directory/a['path'];dest.parent.mkdir(exist_ok=True);temp=dest
-            try:
-                request(a['url'],{'pbs.twimg.com','video.twimg.com'},1000000000 if a['kind']=='video' else 30000000,temp)
-                if a['kind']=='video':
-                    import imageio_ffmpeg,re
-                    probe=subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-hide_banner','-i',str(temp)],capture_output=True,text=True,timeout=20)
-                    duration=re.search(r'Duration: (\d+):(\d+):([\d.]+)',probe.stderr)
-                    size=re.search(r'Video:.*?\b(\d{2,5})x(\d{2,5})\b',probe.stderr)
-                    if not duration or not size:raise ValueError('Cannot verify video duration or resolution')
-                    seconds=int(duration[1])*3600+int(duration[2])*60+float(duration[3])
-                    if seconds>1800 or min(int(size[1]),int(size[2]))>1080:raise ValueError('Video exceeds duration/resolution limit; awaiting handling')
-                temp.rename(dest);a['status']='downloaded';a['attempts']=1
-                import hashlib
-                a['sha256']=hashlib.sha256(dest.read_bytes()).hexdigest()
-                if a['kind']=='video':
-                    for anchor in article.select('a[href]'):
-                        if anchor['href']==a['url']:anchor['href']=a['path']
-            except Exception as error:
-                a['attempts']=1;a['status']='waiting_confirmation' if 'confirmation' in str(error) or 'limit' in str(error) else 'failed';a['error']=str(error)
-                if a['status']=='waiting_confirmation':a['limitReached']=True
+            old=next((v for v in prior if v.get('id')==a['id'] and v.get('fingerprint')==a['fingerprint']),None)
+            if old:a.update({k:v for k,v in old.items() if k in ('status','attempts','sha256','limitReached','error')})
+        manifest.write_text(json.dumps({'source_url':url,'assets':assets,'context':context},ensure_ascii=False,indent=2))
+        # Use the same bounded downloader for first capture and subsequent recovery.
+        media=resume_assets(directory,initial=True)
+        assets=media['assets']
+        for a in assets:
+            if a['status']=='downloaded' and a['kind']=='video':
+                for anchor in article.select('a[href]'):
+                    if anchor['href']==a['url']:anchor['href']=a['path']
         # Failed attachments keep the original remote link, not a broken local link.
         body=markdownify(str(article),heading_style='ATX')
         for a in assets:

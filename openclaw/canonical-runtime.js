@@ -28,9 +28,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
    const result=await feishu.reply({replyTo:job.messageId,text:`【Wiki】记录完成，已通过 nashsu API 核验。\n标题：${job.result.title??"见来源卡"}\n摘要：${job.result.summary??"见来源卡"}\n正文：${job.result.source}\n${job.result.attachmentStatus==='partial'?'部分完成：正文已保存，附件缺失 '+(job.result.missingAssets?.length??0)+' 项。':'附件已核验。'}\n${job.result.contextStatus==='partial'?'上下文部分完成：'+job.result.contextGaps.join('；'):''}\n${job.result.supplements?.length?'补充附件：'+job.result.supplements.join('、'):''}\n${job.result.userRecord?'个人背景：'+job.result.userRecord:''}\n已取得的原文与附件已归档；处理临时文件已清理。\n待审修改：${job.result.reviews?.length??0} 项：${job.result.reviews?.map(r=>r.id).join("、")||"无"}（已保存在 nashsu，未覆盖已有页面）。`,uuid:job.id.slice(0,32)},{signal});
    if(!result?.message_id||result.chat_id!==job.chat)throw Error('Delivery result unknown');return result.message_id;
   }});
- return{
-  async accept(scope,url,signal){return this.acceptMessage({...scope},scope.MessageSidFull??scope.MessageSid,signal,url);},
-  async acceptMessage(scope,id,signal,expectedURL){
+ async function acceptMessage(scope,id,signal,expectedURL){
    check(scope);if(!/^om_[\w-]+$/u.test(id??''))throw Error('Message ID required');
    const source=await feishu.getMessage(id,{signal});
    if(source.message_id!==id||source.chat_id!==scope.NativeChannelId||source.sender?.id!==scope.SenderId||source.sender.id_type!=='open_id'||source.sender.sender_type!=='user'||source.deleted)throw Error('Source mismatch');
@@ -42,6 +40,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
     const changes={controlMessageId:id};
     if(parsed.mode==='登录继续'){
      if(current.status!=='waiting_login'||!['x.com','mp.weixin.qq.com'].includes(new URL(current.url).hostname))throw Error('Task is not waiting for supported login');
+     if(current.result?.resumableMedia){const asset=current.result.missingAssets.find(a=>a.status==='waiting_login');if(asset)changes.mediaAction={assetId:asset.id,resetAttempts:true,cycle:id};}
      changes.browserAuthorization={messageId:id,sender:scope.SenderId,chat:scope.NativeChannelId,source:current.url,at:new Date().toISOString()};
     }else if(current.status==='waiting_login')throw Error('请先完成专用浏览器登录，再发送登录继续');
     if(['补附件','确认视频'].includes(parsed.mode)){
@@ -51,7 +50,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
       if(asset.kind!=='video'||asset.status!=='waiting_confirmation'||asset.fingerprint!==parsed.fingerprint)throw Error('Video confirmation does not match pending attachment');
       changes.mediaApprovals={...current.mediaApprovals,[asset.id]:{fingerprint:asset.fingerprint,messageId:id,sender:scope.SenderId,chat:scope.NativeChannelId,jobId:parsed.jobId,at:new Date().toISOString()}};
      }
-    }else if(current.result?.resumableMedia&&current.result.status==='partial')throw Error('请按附件ID补附件或确认视频');
+    }else if(parsed.mode!=='登录继续'&&current.result?.resumableMedia&&current.result.status==='partial')throw Error('请按附件ID补附件或确认视频');
     await queue.retry(parsed.jobId,changes);return{jobId:parsed.jobId,status:'queued'};
    }
    if(parsed?.action!=='record' ||(expectedURL&&parsed.url!==expectedURL))throw Error('Source command mismatch');
@@ -62,7 +61,11 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
     jobs.push(await queue.enqueue({id:taskId,messageId:id,url,itemIndex:index+1,...(item.inputError?{inputError:item.inputError}:{}),...(item.text!==undefined?{text:item.text}:{}),background:parsed.background??'',refresh:parsed.refresh===true,sender:scope.SenderId,chat:scope.NativeChannelId}));
    }
    return {...jobs[0],duplicate:jobs.every(j=>j.duplicate),jobs};
-  },
+  }
+ let controlIngress=Promise.resolve();
+ return{
+  async accept(scope,url,signal){return this.acceptMessage({...scope},scope.MessageSidFull??scope.MessageSid,signal,url);},
+  acceptMessage(...args){const next=controlIngress.then(()=>acceptMessage.apply(this,args));controlIngress=next.catch(()=>{});return next;},
   async status(scope,id){check(scope);const job=await queue.status(id);if(!job||job.sender!==scope.SenderId||job.chat!==scope.NativeChannelId)throw Error('Job not found');return{jobId:id,url:job.url,controlMessageIds:job.controlMessages??[],mediaApprovals:job.mediaApprovals??{},status:job.status,stage:job.stage,createdAt:job.createdAt,result:job.result??null,reason:job.failure??null,nextAttemptAt:job.nextAttemptAt??null,receiptConfirmed:Boolean(job.receiptId)};},
   async retryTranslation(scope,id){const job=await this.status(scope,id);if(['waiting_login','waiting_confirmation','waiting_media'].includes(job.status))throw Error('Use the explicit recovery command');await queue.retry(id);return{jobId:id,status:'queued'};},
   start:queue.start,processJobs:queue.drain,

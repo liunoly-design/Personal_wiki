@@ -74,3 +74,16 @@ test('restart preserves five-attempt budget and repeated partial input points to
  const options={stateDir,python:'/usr/bin/python3',now:()=>clock,run:async()=>{runs++;throw Error('network unavailable');}};let queue=await openTaskQueue(options);
  try{await queue.enqueue(task);for(let i=0;i<5;i++){await queue.drain();clock+=4000000;}await queue.close();queue=await openTaskQueue(options);await queue.drain();assert.equal(runs,5);assert.equal((await queue.status(task.id)).attempts,5);}finally{await queue.close();await rm(stateDir,{recursive:true,force:true});}
 });
+
+test('hard process interruption records an attempt before the external stage and restart cannot reset it',async()=>{
+ const {spawn}=await import('node:child_process');const {once}=await import('node:events');
+ const stateDir=await mkdtemp(join(tmpdir(),'wiki-killed-'));let child;
+ try{
+  const module=new URL('../src/task-queue.js',import.meta.url).href;
+  child=spawn(process.execPath,['--input-type=module','-e',`import {openTaskQueue} from ${JSON.stringify(module)}; const q=await openTaskQueue({stateDir:${JSON.stringify(stateDir)},python:'/usr/bin/python3',run:async()=>{process.stdout.write('external-started');await new Promise(()=>{});}});await q.enqueue(${JSON.stringify(task)});await q.drain();`],{stdio:['ignore','pipe','pipe']});
+  await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',()=>reject(Error('Worker exited before external stage')));});
+  const stopped=once(child,'exit');child.kill('SIGKILL');await stopped;
+  let queue;for(let i=0;i<50;i++){try{queue=await openTaskQueue({stateDir,python:'/usr/bin/python3',run:async()=>({status:'complete'})});break;}catch(error){if(i===49)throw error;await new Promise(r=>setTimeout(r,10));}}
+  try{assert.equal((await queue.status(task.id)).attempts,1);await queue.drain();assert.equal((await queue.status(task.id)).attempts,2);}finally{await queue.close();}
+ }finally{child?.kill('SIGKILL');await rm(stateDir,{recursive:true,force:true});}
+});

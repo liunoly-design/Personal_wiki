@@ -45,7 +45,7 @@ class CaptureMediaTest(unittest.TestCase):
     elif 'pbs.twimg.com' in url:dest.write_bytes(b'synthetic image')
     else:dest.write_bytes(sample.read_bytes())
    info={'duration':0.1,'formats':[{'url':'https://video.twimg.com/sample.mp4','ext':'mp4','width':160,'height':90,'vcodec':'h264','protocol':'https'}]}
-   with patch('scripts.capture_article.request',side_effect=request),patch('scripts.capture_article.extract_public',return_value=info):
+   with patch('scripts.capture_article.request',side_effect=request),patch('scripts.capture_article.extract_public',return_value=info),patch('scripts.attachment_resume.download',side_effect=lambda url,dest,**kwargs:request(url,set(),0,dest)):
     result=capture('https://x.com/a/status/123',root/'capture')
    self.assertEqual(result['status'],'complete')
    body=(Path(result['directory'])/'article.md').read_text()
