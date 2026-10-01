@@ -16,7 +16,7 @@ export function createPlugin({openRuntime=defaultOpenRuntime}={}){
    const finish=(text)=>{const queuedFinal=text?ctx.dispatcher.sendFinalReply({text}):false;ctx.recordProcessed('completed',{reason:'personal_wiki'});ctx.markIdle('message_completed');return {handled:true,queuedFinal,counts:ctx.dispatcher.getQueuedCounts()};};
    if(event.sendPolicy!=='allow'||event.suppressUserDelivery||event.suppressReplyLifecycle||event.shouldRouteToOriginating||event.isTailDispatch||ctx.abortSignal?.aborted)return finish();
    if(command.action==='reserved')return finish(`【Wiki】“${command.mode}”已预留，暂未开放。目前请使用：小婕 wk 记录：链接`);
-   if(command.action==='invalid')return finish('【Wiki】请使用“小婕 wk 记录：链接”，首版每次一个 X 或微信公众号链接。');
+   if(command.action==='invalid')return finish('【Wiki】请使用“小婕收集：内容”或“小婕 wk 记录：链接”，支持公开博客、X、微信、多链接及粘贴文本；个人说明请用“备注：”。');
    try{
     const result=await (await runtime()).accept(c,command.url,ctx.abortSignal);
     return finish(result.duplicate?'【Wiki】这条消息已接收，请勿重复提交；结果以完成回执为准。':'【Wiki】收到，开始采集。会下载资料、整理中文全文和名词解释；写入资料库并核验后回复结果。');

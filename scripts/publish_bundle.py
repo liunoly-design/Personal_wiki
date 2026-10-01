@@ -17,6 +17,22 @@ def rewrite_links(body, path, mapping):
 
 def publish(request):
     target = Root(request['vault'])
+    if 'background' in request:
+        lock = target.lock()
+        try:
+            rid = request['requestId']
+            if not re.fullmatch('[a-f0-9]{64}', rid):
+                raise ValueError('Invalid request ID')
+            source = str(Path(request['source']).relative_to(target.path))
+            if not re.fullmatch(r'wiki/sources/[a-z][a-z0-9-]*\.md', source):
+                raise ValueError('Invalid note source')
+            path = f'wiki/queries/user-note-{rid}.md'
+            body = f'# 个人备注与背景\n\n来源：[资料卡](../../{source})\n\n以下为用户提供的背景，不属于原作者内容或来源证据。\n\n{request["background"]}\n'
+            target.immutable(path, body.encode())
+            return dict(source=str(target.path / path), files={path: sha(body.encode())}, assets={})
+        finally:
+            os.close(lock)
+            os.close(target.fd)
     staging = Root(request['staging'])
     lock = target.lock()
     try:

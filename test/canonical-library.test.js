@@ -50,3 +50,15 @@ test('a colliding title keeps new concept references attached to the new article
   assert.ok(body.includes('../sources/'+result.source.split('/').at(-1)));assert.equal(await readFile(join(vault,'wiki/sources/example.md'),'utf8'),'# 旧文章');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('pasted text preserves bytes and background stays separate; duplicate and unchanged refresh skip models',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'canonical-text-')),vault=join(root,'vault');let calls=0;
+ const base={url:'https://text.personal-wiki.invalid/abc',text:'这是一份粘贴文本。\n\n原始末节。\n',background:'个人秘密背景',requestId:'a'.repeat(64),vault,python:'/usr/bin/python3',flash:{extract:async text=>{calls++;assert.ok(!text.includes('秘密'));return{slug:'pasted-text',terms:[]};},explain:async()=>[]},generate:async({stage})=>{calls++;return stage==='analysis'?'分析':'---FILE: wiki/sources/pasted-text.md---\n# 粘贴\n摘要。\n---END FILE---';},api:{read:p=>readFile(join(vault,p),'utf8')}};
+ try{await mkdir(vault);const result=await collectCanonical({...base,workspace:join(root,'w1')});assert.equal(await readFile(join(vault,'raw/assets',result.sourceId,'article.md'),'utf8'),base.text);assert.ok(! (await readFile(result.source,'utf8')).includes('秘密'));assert.match(await readFile(result.userRecord,'utf8'),/个人秘密背景/);const count=calls;await collectCanonical({...base,workspace:join(root,'w2'),previousResult:result});await collectCanonical({...base,workspace:join(root,'w3'),previousResult:result,refresh:true});assert.equal(calls,count);}finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('changed refresh keeps the old original and manual card, and creates a new version',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'changed-')),vault=join(root,'v');let body='第一版原文。';let calls=0;
+ const base={url:'https://example.org/article',vault,python:'/usr/bin/python3',capture:async url=>{calls++;const dir=join(root,'captures',String(calls));await mkdir(dir,{recursive:true});await writeFile(join(dir,'article.md'),body);return {directory:dir,text:body,status:'complete'};},flash:{extract:async()=>({slug:'versioned-article',terms:[]}),explain:async()=>[]},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/versioned-article.md---\n# 资料\n摘要。\n---END FILE---',api:{read:p=>readFile(join(vault,p),'utf8')}};
+ try{await mkdir(vault);const first=await collectCanonical({...base,workspace:join(root,'w1')});const bytes=await readFile(join(vault,'raw/assets',first.sourceId,'article.md'));await writeFile(first.source,'# 手写资料卡');body='第二版原文，新增末节。';const second=await collectCanonical({...base,workspace:join(root,'w2'),previousResult:first,refresh:true});assert.notEqual(second.sourceId,first.sourceId);assert.notEqual(second.source,first.source);assert.deepEqual(await readFile(join(vault,'raw/assets',first.sourceId,'article.md')),bytes);assert.equal(await readFile(first.source,'utf8'),'# 手写资料卡');assert.match(await readFile(second.source,'utf8'),/新增末节/);}finally{await rm(root,{recursive:true,force:true});}
+});

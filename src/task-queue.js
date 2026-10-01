@@ -14,10 +14,11 @@ export async function acquireQueueLease(directory,python){
 function waitingReason(message,attempts){
  if(/402|quota|capacity|额度/iu.test(message))return 'waiting_capacity';
  if(/401|403|login|captcha|验证码|登录/iu.test(message))return 'waiting_login';
+ if(/Article extraction incomplete|extraction requires review/iu.test(message))return 'waiting_extraction';
  if(/Attachments incomplete|unsupported media/iu.test(message))return 'waiting_media';
  return attempts>=5?'waiting_retry':'retry';
 }
-export async function openTaskQueue({stateDir,python,run,deliver,now=Date.now,allowed=()=>true}){
+export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,now=Date.now,allowed=()=>true}){
  const active=join(stateDir,'tasks'),complete=join(stateDir,'completed'),work=join(stateDir,'work');
  for(const dir of [stateDir,active,complete,work,join(stateDir,'sources')])await mkdir(dir,{recursive:true,mode:0o700});
  const release=await acquireQueueLease(stateDir,python);let closed=false,running=false,timer,ingress=Promise.resolve();const controller=new AbortController();
@@ -87,6 +88,9 @@ export async function openTaskQueue({stateDir,python,run,deliver,now=Date.now,al
     job.nextAttemptAt=now()+Math.min(3600000,30000*2**Math.min(job.attempts-1,7));
    }
    await saveJSON(file,job);
+   if(!closed&&notifyWaiting&&!job.silent&&job.status.startsWith('waiting_')&&!job.waitingReceiptId){
+    try{job.waitingReceiptId=await notifyWaiting(job,controller.signal);await saveJSON(file,job);}catch{job.waitingReceiptError=true;await saveJSON(file,job);}
+   }
   }
  }
  async function schedule(){

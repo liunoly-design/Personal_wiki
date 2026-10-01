@@ -2,14 +2,25 @@ import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
 export function parseCommand(text) {
- if(typeof text!=='string'||!/^小婕\s+wk(?:\s|[：:])/iu.test(text))return null;
- const match=text.match(/^小婕\s+wk\s+(记录|查询|讨论)\s*[：:]\s*([\s\S]*)$/iu);
- if(!match)return {action:'invalid'};
- if(match[1]!=='记录')return {action:'reserved',mode:match[1]};
- const url=match[2].trim();
- try{const u=new URL(url);if(/\s/u.test(url)||u.protocol!=='https:'||u.username||u.password||u.port)throw Error();
- if(!((u.hostname==='x.com'||u.hostname==='twitter.com')&&/^\/[^/]+\/status\/\d+\/?$/u.test(u.pathname))&&!(u.hostname==='mp.weixin.qq.com'&&u.pathname.startsWith('/s')))throw Error();
- return {action:'record',url};}catch{return {action:'invalid'};}
+ if(typeof text!=='string')return null;
+ const match=text.match(/^小婕\s*(?:(?:wk\s+(记录|查询|讨论))|(重新收集|收集))\s*[：:]?\s*([\s\S]*)$/iu);
+ if(!match)return /^小婕\s+wk(?:\s|[：:])/iu.test(text)?{action:'invalid'}:null;
+ if(['查询','讨论'].includes(match[1]))return {action:'reserved',mode:match[1]};
+ let body=match[3],refresh=match[2]==='重新收集';
+ if(/^重新收集\s*[：:]?/u.test(body)){refresh=true;body=body.replace(/^重新收集\s*[：:]?\s*/u,'');}
+ const split=body.match(/(?:^|\n)\s*(?:备注|背景|个人备注|个人背景)\s*[：:]([\s\S]*)$/u);
+ let background=split?.[1].trim()??'';
+ if(split)body=body.slice(0,split.index);
+ const urls=[...body.matchAll(/https?:\/\/[^\s<>，。；]+/gu)].map(m=>m[0]);
+ if(urls.length){
+  try{for(const url of urls){const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||(u.port&&u.port!=='443'))throw Error();}}catch{return {action:'invalid'};}
+  const extra=body.replace(/https?:\/\/[^\s<>，。；]+/gu,'').replace(/^[\s：:,，;；]+|[\s：:,，;；]+$/gu,'');
+  background=[extra,background].filter(Boolean).join('\n');
+  if(urls.length===1&&!background&&!refresh)return {action:'record',url:urls[0]};
+  return {action:'record',url:urls[0],items:urls.map(url=>({url})),background,refresh};
+ }
+ if(!body.trim())return {action:'invalid'};
+ return {action:'record',items:[{text:body}],background,refresh};
 }
 export const validSlug=s=>typeof s==='string'&&s.length<=100&&/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(s);
 export async function recordArticle({url,vault,signal,onStage=async()=>{}},deps){

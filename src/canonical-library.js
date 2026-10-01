@@ -1,4 +1,4 @@
-import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,readdir} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
@@ -25,13 +25,21 @@ export async function verifyPublication(result,{vault,api}){
   if(digest(await readFile(join(vault,path)))!==hash)throw Error('Archive integrity mismatch: '+path);
  }
 }
+async function captureHashes(directory){
+ const hashes={};
+ async function walk(path,prefix=''){for(const entry of await readdir(path,{withFileTypes:true})){const name=prefix+entry.name;if(entry.isSymbolicLink())throw Error('Snapshot symlinks are not allowed');if(entry.isDirectory())await walk(join(path,entry.name),name+'/');else hashes[name]=digest(await readFile(join(path,entry.name)));}}
+ await walk(directory);return hashes;
+}
 export async function collectCanonical(options){
  const {url,vault,workspace,python,signal,onStage=async()=>{}}=options;
  await mkdir(workspace,{recursive:true,mode:0o700});
  const staging=join(workspace,'staging');await mkdir(staging,{recursive:true,mode:0o700});
  const api=options.api??await localNashsuAPI(vault,{signal});
- const saved=options.previousResult??await optionalJSON(join(workspace,'published.json'));
- if(saved){await onStage('verifying');await verifyPublication(saved,{vault,api});return saved;}
+ const pendingPublication=await optionalJSON(join(workspace,'published.json'));
+ const saved=pendingPublication??(!options.refresh?options.previousResult:null);
+ const verifyReuse=async result=>{await verifyPublication({...result,files:Object.fromEntries(Object.entries(result.files).filter(([path])=>path.startsWith('raw/')))},{vault,api});await api.read('wiki/sources/'+result.source.split('/').at(-1));};
+ const finish=async result=>{if(!options.background)return result;const note=await publishBundle({vault,background:options.background,requestId:options.requestId,source:result.source},{python,signal});await verifyPublication(note,{vault,api});return {...result,userRecord:note.source};};
+ if(saved){await onStage('verifying');if(pendingPublication)await verifyPublication(saved,{vault,api});else await verifyReuse(saved);return finish(saved);}
  // Memoize successful expensive calls before continuing to the next stage.
  const memo=(name,fn)=>async(input,...rest)=>{
   const serial=typeof input==='object'&&input!==null?Object.fromEntries(Object.entries(input).filter(([k])=>k!=='signal')):input;
@@ -46,18 +54,26 @@ export async function collectCanonical(options){
  const adapters=createAdapters({vault:staging,python,captureDirectory:join(workspace,'capture'),flash,reading:true,
   generate:memo('generate',async input=>{const value=await (options.generate??createCodex({binary:options.codexBinary,model:options.compilerModel}))(input);if(input.stage==='generation'){const parsed=parseFileBlocks(value);if(parsed.warnings.length||parsed.truncatedPaths.length||!parsed.blocks.length)throw Error('Incomplete generation');}return value;}),
   translate:options.translate??codexTranslator(options.codexBinary)});
- const capture=options.capture??adapters.capture;
- adapters.capture=memo('capture',async(...args)=>{const value=await capture(...args);if(value.status!=='complete')throw Error('Attachments incomplete; retry required');return value;});
+ const capture=options.capture??(options.text!==undefined?async()=>{const directory=join(workspace,'capture','package');await mkdir(directory,{recursive:true});await writeFile(join(directory,'article.md'),options.text);return {directory,text:options.text,status:'complete'};}:adapters.capture);
+ const captured=await memo('capture',capture)(url,signal);
+ if(captured.status!=='complete'&&!(captured.publicBlog&&captured.status==='partial'))throw Error('Attachments incomplete; retry required');
+ const snapshotHashes=await captureHashes(captured.directory);
+ const priorHashes=options.previousResult?.snapshotHashes??(options.previousResult?.assets?Object.fromEntries(Object.entries(options.previousResult.assets).map(([path,hash])=>[path.split('/').slice(3).join('/'),hash])):null);
+ if(options.refresh&&priorHashes&&JSON.stringify(Object.entries(snapshotHashes).sort())===JSON.stringify(Object.entries(priorHashes).sort())){
+  await verifyReuse(options.previousResult);return finish(options.previousResult);
+ }
+ adapters.capture=async()=>captured;
  // Existing staged archives are resumed by importAndCompile, including models
  // interrupted before a complete generation was saved.
  delete adapters.lookupExisting;
  let result=await recordArticle({url,vault:staging,signal,onStage},adapters);
  if(result.reading?.status!=='complete')throw Error('Chinese reading incomplete; retry required');
- if(result.attachmentStatus!=='complete')throw Error('Attachments incomplete; retry required');
+ if(result.attachmentStatus!=='complete'&&!captured.publicBlog)throw Error('Attachments incomplete; retry required');
  await api.assertPublisherReady?.();
  await onStage('publishing');
+ const compiled=result;
  result=await publishBundle({vault,staging,sourceId:result.sourceId},{python,signal});
- await saveJSON(join(workspace,'published.json'),result);
+ result={...result,title:compiled.title??result.title,summary:compiled.summary??null,snapshotHashes,attachmentStatus:captured.status,missingAssets:captured.missingAssets??[]};await saveJSON(join(workspace,'published.json'),result);
  await onStage('verifying');await verifyPublication(result,{vault,api});
- return result;
+ return finish(result);
 }

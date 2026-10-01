@@ -10,7 +10,7 @@ test('only record executes; query/discuss remain reserved',()=>{
  assert.deepEqual(parseCommand('小婕 wk 记录：https://x.com/a/status/123'),{action:'record',url:'https://x.com/a/status/123'});
  assert.equal(parseCommand('小婕 wk 查询：Canvas').action,'reserved');
  assert.equal(parseCommand('小婕 wk 讨论：视频制作').action,'reserved');
- assert.equal(parseCommand('小婕 wk 记录：https://x.com/a/status/1 https://x.com/a/status/2').action,'invalid');
+ assert.equal(parseCommand('小婕 wk 记录：https://x.com/a/status/1 https://x.com/a/status/2').items.length,2);
 });
 test('basic Flash explanations are saved before article compilation; basics do not receive article body',async()=>{
  const root=await mkdtemp(join(tmpdir(),'wk-test-'));const events=[];

@@ -187,7 +187,12 @@ def capture(url, output):
         (directory/'article.md').write_text('---\nsource_url: '+json.dumps(url)+'\n---\n\n'+body)
         (directory/'manifest.json').write_text(json.dumps({'source_url':url,'assets':assets},ensure_ascii=False,indent=2))
         result={'directory':str(directory.resolve()),'status':'complete' if all(a['status']=='downloaded' for a in assets) else 'partial'}
-    else:raise ValueError('Unsupported platform')
+    else:
+        try:
+            from .blog_capture import capture_blog
+        except ImportError:
+            from blog_capture import capture_blog
+        result=capture_blog(url,out)
     receipt.write_text(json.dumps(result));return result
 
 if __name__=='__main__':
