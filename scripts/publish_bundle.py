@@ -7,8 +7,9 @@ from protected_store import Root, encode, sha, verify, rewrite_attachments
 
 def rewrite_links(body, path, mapping):
     def target(value):
-        normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), value))
-        return posixpath.relpath(mapping[normalized], posixpath.dirname(path)) if normalized in mapping else value
+        bare, separator, fragment = value.partition('#')
+        normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), bare))
+        return posixpath.relpath(mapping[normalized], posixpath.dirname(path)) + (separator + fragment if separator else '') if normalized in mapping else value
     body = re.sub(r'(\]\(<?)([^\s)>]+)', lambda m: m[1] + target(m[2]), body)
     body = re.sub(r'(?m)^(\s*\[[^\]]+\]:\s*<?)([^\s>]+)', lambda m: m[1] + target(m[2]), body)
     return body

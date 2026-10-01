@@ -21,7 +21,7 @@ export async function openTaskQueue({stateDir,python,run,deliver,now=Date.now,al
  const active=join(stateDir,'tasks'),complete=join(stateDir,'completed'),work=join(stateDir,'work');
  for(const dir of [stateDir,active,complete,work,join(stateDir,'sources')])await mkdir(dir,{recursive:true,mode:0o700});
  const release=await acquireQueueLease(stateDir,python);let closed=false,running=false,timer,ingress=Promise.resolve();const controller=new AbortController();
- const inFlightURLs=new Set();
+ const inFlightURLs=new Set(),inFlight=new Map();let scheduling=false;
  async function status(id){if(!valid(id))throw Error('Invalid task ID');return await optionalJSON(join(active,id+'.json'))??await optionalJSON(join(complete,id+'.json'));}
  async function enqueue(task){
   if(closed)throw Error('Task queue closed');
@@ -29,6 +29,7 @@ export async function openTaskQueue({stateDir,python,run,deliver,now=Date.now,al
   if(await status(task.id))return{duplicate:true,jobId:task.id};
   const job={...task,url:canonicalURL(task.url),status:'queued',stage:'accepted',createdAt:task.createdAt??new Date(now()).toISOString(),attempts:0};
   await saveJSON(join(work,job.id,'task.json'),job);await saveJSON(join(active,job.id+'.json'),job);
+  if(running)await schedule();
   return{duplicate:false,jobId:job.id};
  }
  async function cleanup(job){
@@ -60,8 +61,7 @@ export async function openTaskQueue({stateDir,python,run,deliver,now=Date.now,al
   try{job=await optionalJSON(file);}catch{return;}
   if(!job||!valid(job.id)||name!==job.id+'.json'||closed)return;
   if(!allowed(job)){job.status='scope_removed';await saveJSON(file,job);return;}
-  if(job.status?.startsWith('waiting_')||job.nextAttemptAt>now()||inFlightURLs.has(job.url))return;
-  inFlightURLs.add(job.url);
+  if(job.status?.startsWith('waiting_')||job.nextAttemptAt>now())return;
   try{
    if(job.status!=='cleanup_pending'&&job.status!=='delivery_pending'){
     const workspaceInfo=await lstat(join(work,job.id)).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
@@ -87,14 +87,34 @@ export async function openTaskQueue({stateDir,python,run,deliver,now=Date.now,al
     job.nextAttemptAt=now()+Math.min(3600000,30000*2**Math.min(job.attempts-1,7));
    }
    await saveJSON(file,job);
-  }finally{inFlightURLs.delete(job.url);}
+  }
+ }
+ async function schedule(){
+  if(scheduling||closed)return;scheduling=true;
+  try{
+   for(const name of (await readdir(active)).filter(n=>/^[a-f0-9]{64}\.json$/u.test(n)).sort()){
+    if(inFlight.size>=2||closed)break;
+    if(inFlight.has(name))continue;
+    let job;try{job=await optionalJSON(join(active,name));}catch{continue;}
+    if(!job||job.status?.startsWith('waiting_')||job.status==='scope_removed'||job.nextAttemptAt>now()||inFlightURLs.has(job.url))continue;
+    inFlightURLs.add(job.url);
+    const promise=processOne(name).catch(async error=>{await saveJSON(join(stateDir,'worker-error.json'),{reason:error.message,at:new Date(now()).toISOString()});}).finally(()=>{inFlight.delete(name);inFlightURLs.delete(job.url);});
+    inFlight.set(name,promise);
+   }
+  }finally{scheduling=false;}
  }
  async function drain(){
-  if(closed||running)return;running=true;
+  if(closed)return;
+  if(running){await schedule();return;}
+  running=true;
   try{
-   await recover();const names=(await readdir(active)).filter(n=>/^[a-f0-9]{64}\.json$/u.test(n)).sort();let index=0;
-   await Promise.all([0,1].map(async()=>{while(index<names.length&&!closed){const name=names[index++];await processOne(name);}}));
-  }finally{running=false;}
+   await recover();
+   do{
+    await schedule();
+    if(!inFlight.size)break;
+    await Promise.race([...inFlight.values()]);
+   }while(inFlight.size||!closed);
+  }finally{await Promise.allSettled([...inFlight.values()]);running=false;}
  }
  await recover(true);
  return{enqueue:task=>{const result=ingress.then(()=>enqueue(task));ingress=result.catch(()=>{});return result;},status,drain,recover,

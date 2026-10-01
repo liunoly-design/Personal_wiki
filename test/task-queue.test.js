@@ -48,3 +48,14 @@ test('a slow task does not block a different article and repeated failures wait 
   const status=await queue.status('b'.repeat(64));assert.equal(status.status,'waiting_retry');assert.equal(status.attempts,5);
  }finally{unblock();await queue.close();await rm(stateDir,{recursive:true,force:true});}
 });
+
+test('a new short task uses the idle slot while an older task is still running',async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'wiki-live-'));let unblock,started,second=false;
+ const first=new Promise(resolve=>unblock=resolve),running=new Promise(resolve=>started=resolve);
+ const queue=await openTaskQueue({stateDir,python:'/usr/bin/python3',run:async job=>{if(job.id===task.id){started();await first;}else second=true;return{status:'complete'};}});
+ try{
+  await queue.enqueue(task);const draining=queue.drain();await running;
+  await queue.enqueue({...task,id:'c'.repeat(64),url:'https://x.com/a/status/999'});
+  await new Promise(resolve=>setTimeout(resolve,100));assert.equal(second,true);unblock();await draining;
+ }finally{unblock();await queue.close();await rm(stateDir,{recursive:true,force:true});}
+});
