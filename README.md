@@ -1,12 +1,14 @@
 # 个人 Wiki / Personal Wiki
 
-本机已部署 Personal Wiki **0.4.1**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
+本机已部署 Personal Wiki **0.4.2**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
 
 - `raw/sources/`：原始文章；`raw/assets/`：图片、视频等原始附件。
 - `wiki/sources/`：来源卡与完整中文阅读正文；`wiki/concepts/`、`wiki/entities/`：概念与实体。
 - Agent 的任务和中间文件位于 Vault 外。通过 nashsu API 回读核验后清理；启动时恢复未完成任务。
 
 0.4.1 支持公开博客、粘贴文本、多链接、独立个人背景、收集别名及显式重新收集。见[计划](docs/plans/v0.4.1.md)、[SPEC](docs/specs/v0.4.1.md) 和[验收报告](docs/research/v0.4.1-acceptance-2026-10-01.md)。历史迁移见[0.4 部署记录](docs/research/canonical-library-2026-10-01.md)。原有 `reading`、`raw/inputs`、`raw/sources/collected`、`glossary` 已迁入正式目录。
+
+0.4.2 新增复杂 X 上下文、隔离登录恢复、逐项补附件与精确超限视频确认，保留正文部分完成及可恢复任务。见[计划](docs/plans/v0.4.2.md)、[SPEC](docs/specs/v0.4.2.md)和[验收/飞书操作步骤](docs/research/v0.4.2-acceptance-2026-10-01.md)。公开微信与本机部署核验通过；真实复杂 X、账号登录和飞书入站仍需用户验收。
 
 可用入口和验收范围见[当前用例清单](docs/current-capabilities.md)。
 
