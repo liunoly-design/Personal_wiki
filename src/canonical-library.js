@@ -67,7 +67,7 @@ export async function collectCanonical(options){
  // interrupted before a complete generation was saved.
  delete adapters.lookupExisting;
  let result=await recordArticle({url,vault:staging,signal,onStage,sourceContext:options.text!==undefined?'来源是用户粘贴的资料。text.personal-wiki.invalid 是本机内容标识，不是网页出处，不得虚构原作者或原网页。':''},adapters);
- if(result.reading?.status!=='complete')throw Error('Chinese reading incomplete; retry required');
+ if(result.reading?.status!=='complete')throw Error(result.reading?.reason??'Chinese reading incomplete; retry required');
  if(result.attachmentStatus!=='complete'&&!captured.publicBlog)throw Error('Attachments incomplete; retry required');
  await api.assertPublisherReady?.();
  await onStage('publishing');
