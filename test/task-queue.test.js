@@ -36,26 +36,28 @@ test('delivery failure resumes delivery after cleanup without rerunning the arti
 });
 
 test('a slow task does not block a different article and repeated failures wait after five attempts',async()=>{
- const stateDir=await mkdtemp(join(tmpdir(),'wiki-parallel-'));let unblock,second=false,clock=0;
- const first=new Promise(resolve=>unblock=resolve);
+ const stateDir=await mkdtemp(join(tmpdir(),'wiki-parallel-'));let unblock,second=false,clock=0,markSecondStarted;
+ const first=new Promise(resolve=>unblock=resolve),secondStarted=new Promise(resolve=>markSecondStarted=resolve);
  const queue=await openTaskQueue({stateDir,python:'/usr/bin/python3',now:()=>clock,run:async job=>{
-  if(job.id===task.id){await first;return{status:'complete'};}second=true;throw Error('network unavailable');
+  if(job.id===task.id){await first;return{status:'complete'};}second=true;markSecondStarted();throw Error('network unavailable');
  }});
  try{
   await queue.enqueue(task);await queue.enqueue({...task,id:'b'.repeat(64),url:'https://x.com/a/status/456'});
-  const draining=queue.drain();await new Promise(resolve=>setTimeout(resolve,100));assert.equal(second,true);unblock();await draining;
+  const draining=queue.drain();await awaitStart(secondStarted);assert.equal(second,true);unblock();await draining;
   for(let i=0;i<5;i++){clock+=4000000;await queue.drain();}
   const status=await queue.status('b'.repeat(64));assert.equal(status.status,'waiting_retry');assert.equal(status.attempts,5);
  }finally{unblock();await queue.close();await rm(stateDir,{recursive:true,force:true});}
 });
 
 test('a new short task uses the idle slot while an older task is still running',async()=>{
- const stateDir=await mkdtemp(join(tmpdir(),'wiki-live-'));let unblock,started,second=false;
- const first=new Promise(resolve=>unblock=resolve),running=new Promise(resolve=>started=resolve);
- const queue=await openTaskQueue({stateDir,python:'/usr/bin/python3',run:async job=>{if(job.id===task.id){started();await first;}else second=true;return{status:'complete'};}});
+ const stateDir=await mkdtemp(join(tmpdir(),'wiki-live-'));let unblock,started,second=false,markSecondStarted;
+ const first=new Promise(resolve=>unblock=resolve),running=new Promise(resolve=>started=resolve),secondStarted=new Promise(resolve=>markSecondStarted=resolve);
+ const queue=await openTaskQueue({stateDir,python:'/usr/bin/python3',run:async job=>{if(job.id===task.id){started();await first;}else{second=true;markSecondStarted();}return{status:'complete'};}});
  try{
   await queue.enqueue(task);const draining=queue.drain();await running;
   await queue.enqueue({...task,id:'c'.repeat(64),url:'https://x.com/a/status/999'});
-  await new Promise(resolve=>setTimeout(resolve,100));assert.equal(second,true);unblock();await draining;
+  await awaitStart(secondStarted);assert.equal(second,true);unblock();await draining;
  }finally{unblock();await queue.close();await rm(stateDir,{recursive:true,force:true});}
 });
+
+async function awaitStart(started){await Promise.race([started,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('Independent task did not start')),5000);timer.unref();})]);}
