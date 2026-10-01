@@ -20,3 +20,29 @@ class BlogCaptureTest(unittest.TestCase):
    with self.assertRaises(ValueError):public_addresses(url)
   with patch('socket.getaddrinfo',return_value=[(2,1,6,'',('10.0.0.1',443))]):
    with self.assertRaises(ValueError):public_addresses('https://example.org')
+ def test_redirect_to_private_address_never_opens_connection(self):
+  from scripts.blog_capture import fetch_public
+  class Response:
+   status=302
+   def getheader(self,name):return 'https://127.0.0.1/private'
+  class Connection:
+   def request(self,*args,**kwargs):pass
+   def getresponse(self):return Response()
+   def close(self):pass
+  def addresses(host,port,**kwargs):return [(2,1,6,'',('127.0.0.1' if host=='127.0.0.1' else '93.184.216.34',443))]
+  with tempfile.TemporaryDirectory() as temp,patch('socket.getaddrinfo',side_effect=addresses),patch('scripts.blog_capture.PinnedHTTPS',return_value=Connection()) as connection:
+   with self.assertRaises(ValueError):fetch_public('https://example.org/start',1000,Path(temp)/'body')
+   self.assertEqual(connection.call_count,1)
+ def test_public_redirect_keeps_validated_hostname_and_pinned_ip(self):
+  from scripts.blog_capture import fetch_public
+  class Response:
+   def __init__(self,status):self.status=status
+   def getheader(self,name):return '/final' if name=='Location' else '5'
+   def read(self,limit):return b'hello'
+  class Connection:
+   def __init__(self,status):self.status=status
+   def request(self,*args,**kwargs):pass
+   def getresponse(self):return Response(self.status)
+   def close(self):pass
+  with tempfile.TemporaryDirectory() as temp,patch('socket.getaddrinfo',return_value=[(2,1,6,'',('93.184.216.34',443))]),patch('scripts.blog_capture.PinnedHTTPS',side_effect=[Connection(302),Connection(200)]) as connection:
+   dest=Path(temp)/'body';self.assertEqual(fetch_public('https://example.org/start',1000,dest),'https://example.org/final');self.assertEqual(dest.read_bytes(),b'hello');self.assertEqual(connection.call_args.args,('example.org','93.184.216.34'))

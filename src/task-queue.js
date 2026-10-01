@@ -71,7 +71,8 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
     const known=await optionalJSON(join(stateDir,'sources',urlKey(job.url)+'.json'));
     job.result=await run(job,join(work,job.id),controller.signal,async(stage,details={})=>{job.stage=stage;job.details={...job.details,...details};await saveJSON(file,job);},known?.result);
     if(job.result.status!=='complete')throw Error('Result incomplete; retain work');
-    await saveJSON(join(stateDir,'sources',urlKey(job.url)+'.json'),{url:job.url,result:job.result,verifiedAt:new Date(now()).toISOString()});
+    const {userRecord,...sourceResult}=job.result;
+    await saveJSON(join(stateDir,'sources',urlKey(job.url)+'.json'),{url:job.url,result:sourceResult,verifiedAt:new Date(now()).toISOString()});
     job.status='cleanup_pending';delete job.failure;await saveJSON(file,job);
    }
    if(job.status==='cleanup_pending'){await cleanup(job);job.status='delivery_pending';await saveJSON(file,job);}

@@ -38,7 +38,7 @@ export async function collectCanonical(options){
  const pendingPublication=await optionalJSON(join(workspace,'published.json'));
  const saved=pendingPublication??(!options.refresh?options.previousResult:null);
  const verifyReuse=async result=>{await verifyPublication({...result,files:Object.fromEntries(Object.entries(result.files).filter(([path])=>path.startsWith('raw/')))},{vault,api});await api.read('wiki/sources/'+result.source.split('/').at(-1));};
- const finish=async result=>{if(!options.background)return result;const note=await publishBundle({vault,background:options.background,requestId:options.requestId,source:result.source},{python,signal});await verifyPublication(note,{vault,api});return {...result,userRecord:note.source};};
+ const finish=async result=>{const {userRecord,...sourceResult}=result;if(!options.background)return sourceResult;const note=await publishBundle({vault,background:options.background,requestId:options.requestId,source:result.source},{python,signal});await verifyPublication(note,{vault,api});return {...sourceResult,userRecord:note.source};};
  if(saved){await onStage('verifying');if(pendingPublication)await verifyPublication(saved,{vault,api});else await verifyReuse(saved);return finish(saved);}
  // Memoize successful expensive calls before continuing to the next stage.
  const memo=(name,fn)=>async(input,...rest)=>{

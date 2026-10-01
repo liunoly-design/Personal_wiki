@@ -51,7 +51,10 @@ def publish(request):
             name = slug
             # Reserve a collision-free name once; replay uses the durable plan.
             if target.optional(f'wiki/sources/{name}.md') or target.optional(f'raw/sources/{name}.md'):
-                name = slug + '-' + sid[:8]
+                number = 2
+                while target.optional(f'wiki/sources/{slug}--{number}.md') or target.optional(f'raw/sources/{slug}--{number}.md'):
+                    number += 1
+                name = f'{slug}--{number}'
             raw = rewrite_attachments(staging.read(f'raw/assets/{sid}/article.md').decode(), record, '../..')
             raw = raw.rstrip() + f'\n\n[原始网页]({record["url"]})\n'
             reading = staging.read(f'reading/{slug}.zh.md').decode()
