@@ -34,3 +34,17 @@ test('delivery failure resumes delivery after cleanup without rerunning the arti
   assert.equal(count,1);assert.equal((await queue.status(task.id)).status,'done');
  }finally{await queue.close();await rm(stateDir,{recursive:true,force:true});}
 });
+
+test('a slow task does not block a different article and repeated failures wait after five attempts',async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'wiki-parallel-'));let unblock,second=false,clock=0;
+ const first=new Promise(resolve=>unblock=resolve);
+ const queue=await openTaskQueue({stateDir,python:'/usr/bin/python3',now:()=>clock,run:async job=>{
+  if(job.id===task.id){await first;return{status:'complete'};}second=true;throw Error('network unavailable');
+ }});
+ try{
+  await queue.enqueue(task);await queue.enqueue({...task,id:'b'.repeat(64),url:'https://x.com/a/status/456'});
+  const draining=queue.drain();await new Promise(resolve=>setTimeout(resolve,100));assert.equal(second,true);unblock();await draining;
+  for(let i=0;i<5;i++){clock+=4000000;await queue.drain();}
+  const status=await queue.status('b'.repeat(64));assert.equal(status.status,'waiting_retry');assert.equal(status.attempts,5);
+ }finally{unblock();await queue.close();await rm(stateDir,{recursive:true,force:true});}
+});

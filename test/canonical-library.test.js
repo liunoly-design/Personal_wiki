@@ -36,3 +36,17 @@ test('publication preserves an existing concept and exposes its proposed update 
   assert.match(await readFile(join(vault,result.reviews[0].file),'utf8'),/新观点/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('a colliding title keeps new concept references attached to the new article',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'canonical-collision-'));const vault=join(root,'vault'),workspace=join(root,'work');
+ try{
+  await mkdir(join(vault,'wiki/sources'),{recursive:true});await writeFile(join(vault,'wiki/sources/example.md'),'# 旧文章');
+  const result=await collectCanonical({url:'https://x.com/a/status/123',vault,workspace,python:'/usr/bin/python3',
+   capture:async()=>{const directory=join(workspace,'capture');await mkdir(directory,{recursive:true});await writeFile(join(directory,'article.md'),'新的中文原文。');return{directory,text:'新的中文原文。',status:'complete'};},
+   flash:{extract:async()=>({slug:'example',terms:[]}),explain:async terms=>terms.map(t=>({...t,definition:'概念。',example:'示例。',uncertainty:'待核实。'}))},
+   generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/example.md---\n# 新文章\n摘要。\n---END FILE---\n---FILE: wiki/concepts/new-concept.md---\n# 新概念\n[来源](../sources/example.md)\n---END FILE---',
+   api:{read:path=>readFile(join(vault,path),'utf8')}});
+  const body=await readFile(join(vault,'wiki/concepts/new-concept.md'),'utf8');
+  assert.ok(body.includes('../sources/'+result.source.split('/').at(-1)));assert.equal(await readFile(join(vault,'wiki/sources/example.md'),'utf8'),'# 旧文章');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

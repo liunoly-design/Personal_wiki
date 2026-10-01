@@ -7,7 +7,8 @@ import {spawn} from 'node:child_process';
 import {localNashsuAPI} from '../src/nashsu-api.js';
 import {verifyPublication} from '../src/canonical-library.js';
 import {saveJSON,optionalJSON} from '../src/durable-files.js';
-import {canonicalURL} from '../src/task-queue.js';
+import {assessMigration} from '../src/migration-status.js';
+import {canonicalURL,acquireQueueLease} from '../src/task-queue.js';
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const config=JSON.parse(await readFile(join(homedir(),'.openclaw/openclaw.json'),'utf8')).plugins.entries['personal-wiki'].config;
 const {vault,stateDir,python}=config;
@@ -19,6 +20,8 @@ async function operation(operation){
   child.on('close',code=>code?reject(Error(err)):accept(JSON.parse(out)));child.stdin.end(JSON.stringify({operation,vault,destination}));
  });
 }
+const release=process.argv.includes('--apply')?await acquireQueueLease(stateDir,python):null;
+try {
 console.log(await operation('plan'));
 if(!process.argv.includes('--apply'))process.exit(0);
 const api=await localNashsuAPI(vault);await api.assertPublisherReady();
@@ -28,11 +31,25 @@ for(const [path,digest] of Object.entries(plan.hashes))if(hash(await api.read(pa
 for(const result of Object.values(plan.sources))await verifyPublication(result,{vault,api});
 await saveJSON(join(destination,'verified.json'),{planHash:hash(await readFile(join(destination,'plan.json'))),verifiedAt:new Date().toISOString()});
 for(const directory of ['sources','completed','tasks','work'])await mkdir(join(stateDir,directory),{recursive:true,mode:0o700});
-for(const [url,result] of Object.entries(plan.sources))await saveJSON(join(stateDir,'sources',hash(canonicalURL(url))+'.json'),{url:canonicalURL(url),result,verifiedAt:new Date().toISOString()});
+let oldJobsDirectory=join(stateDir,'jobs');try{await readdir(oldJobsDirectory);}catch(e){if(e.code!=='ENOENT')throw e;oldJobsDirectory=join(destination,'legacy-jobs');}
+const jobs=await Promise.all((await readdir(oldJobsDirectory)).filter(name=>/^[a-f0-9]{64}\.json$/u.test(name)).map(async name=>optionalJSON(join(oldJobsDirectory,name))));
+const native=await optionalJSON(join(vault,'.llm-wiki/ingest-cache.json'));
+const incomplete=[],completedSourceIds=[];
+for(const [url,result] of Object.entries(plan.sources)){
+ result.relativeSource??=result.source.slice(vault.length+1);
+ const related=jobs.filter(job=>canonicalURL(job.url)===canonicalURL(url));
+ const receipts=await Promise.all(related.map(job=>optionalJSON(join(stateDir,'captures',job.id,'capture-result.json'))));
+ const entry=Object.values(native?.entries??{}).find(entry=>entry.filesWritten?.includes(result.relativeSource));
+ const decision=assessMigration(result,{url,jobs,nativeEntry:entry,captureStatuses:receipts.map(r=>r?.status)});
+ if(decision.complete){completedSourceIds.push(result.sourceId);await saveJSON(join(stateDir,'sources',hash(canonicalURL(url))+'.json'),{url:canonicalURL(url),result:{...result,status:'complete',completionMode:decision.mode},verifiedAt:new Date().toISOString()});}
+ else incomplete.push(result.sourceId);
+}
+await saveJSON(join(destination,'incomplete.json'),{sourceIds:incomplete});
+await saveJSON(join(destination,'completed-source-ids.json'),completedSourceIds);
 let completed=0,pending=0;
-for(const name of await readdir(join(stateDir,'jobs'))){
+for(const name of await readdir(oldJobsDirectory)){
  if(!/^[a-f0-9]{64}\.json$/u.test(name))continue;
- const job=await optionalJSON(join(stateDir,'jobs',name));if(!job?.url)continue;
+ const job=await optionalJSON(join(oldJobsDirectory,name));if(!job?.url)continue;
  await saveJSON(join(destination,'jobs',name),job);
  const known=await optionalJSON(join(stateDir,'sources',hash(canonicalURL(job.url))+'.json'));
  if(known){
@@ -49,7 +66,7 @@ console.log(await operation('cleanup'));
 const oldMetadata=join(vault,'.personal-wiki'),moved=join(destination,'legacy-metadata');
 try{await lstat(moved);}catch(e){if(e.code!=='ENOENT')throw e;await rename(oldMetadata,moved);}
 // Old task/capture folders are retired only after verified result ledgers exist.
-for(const name of await readdir(join(stateDir,'jobs'))){
+for(const name of await readdir(oldJobsDirectory)){
  if(!/^[a-f0-9]{64}\.json$/u.test(name))continue;
  const id=name.slice(0,-5);if(await optionalJSON(join(stateDir,'completed',name))){
   const capture=join(stateDir,'captures',id);try{if((await lstat(capture)).isSymbolicLink())throw Error('Capture symlink');await rm(capture,{recursive:true});}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -57,3 +74,5 @@ for(const name of await readdir(join(stateDir,'jobs'))){
 }
 await rename(join(stateDir,'jobs'),join(destination,'legacy-jobs')).catch(e=>{if(e.code!=='ENOENT')throw e;});
 console.log({completed,pending,backup:destination});
+
+} finally {await release?.();}

@@ -23,6 +23,7 @@ class CanonicalMigrationTest(unittest.TestCase):
             with self.assertRaises(FileNotFoundError): apply(vault, backup, cleanup=True)
             self.assertTrue((vault/'reading/sample.zh.md').exists())
             (backup/'verified.json').write_text(json.dumps({'planHash':hashlib.sha256((backup/'plan.json').read_bytes()).hexdigest()}))
+            (backup/'completed-source-ids.json').write_text(json.dumps([record['id']]))
             apply(vault, backup, cleanup=True); apply(vault, backup, cleanup=True)
             self.assertFalse((vault/'reading').exists()); self.assertFalse((vault/'raw/inputs').exists())
             self.assertTrue((backup/'before/reading/sample.zh.md').exists())

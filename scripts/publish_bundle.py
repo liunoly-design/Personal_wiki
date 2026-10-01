@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 """Publish staged results without replacing any existing user content."""
-import json, os, re, sys
+import json, os, re, sys, posixpath
 from pathlib import Path
 from protected_store import Root, encode, sha, verify, rewrite_attachments
+
+
+def rewrite_links(body, path, mapping):
+    def target(value):
+        normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), value))
+        return posixpath.relpath(mapping[normalized], posixpath.dirname(path)) if normalized in mapping else value
+    body = re.sub(r'(\]\(<?)([^\s)>]+)', lambda m: m[1] + target(m[2]), body)
+    body = re.sub(r'(?m)^(\s*\[[^\]]+\]:\s*<?)([^\s>]+)', lambda m: m[1] + target(m[2]), body)
+    return body
 
 
 def publish(request):
@@ -33,6 +42,8 @@ def publish(request):
             reading = reading.replace('../raw/assets/', '../../raw/assets/')
             card = staging.read(f'wiki/sources/{slug}.md').decode()
             body = f'{card.rstrip()}\n\n## 完整中文正文\n\n{reading.strip()}\n\n[归档原文](../../raw/sources/{name}.md)\n'
+            mapping = {f'wiki/sources/{slug}.md': f'wiki/sources/{name}.md', f'raw/sources/{slug}.md': f'raw/sources/{name}.md', f'raw/inputs/{slug}.md': f'raw/sources/{name}.md', f'reading/{slug}.zh.md': f'wiki/sources/{name}.md'}
+            body = rewrite_links(body, f'wiki/sources/{name}.md', mapping)
             files = {f'raw/sources/{name}.md': raw, f'wiki/sources/{name}.md': body}
             reviews = []
             candidates = json.loads(staging.read(f'.personal-wiki/compilations/{sid}/generation.json'))['blocks']
@@ -42,7 +53,7 @@ def publish(request):
                     continue
                 if not re.fullmatch(r'wiki/(concepts|entities|topics|synthesis)/[a-z][a-z0-9-]*\.md', path):
                     raise ValueError('Unsafe candidate')
-                content = staging.read(f'.personal-wiki/compilations/{sid}/candidates/{path}').decode()
+                content = rewrite_links(staging.read(f'.personal-wiki/compilations/{sid}/candidates/{path}').decode(), path, mapping)
                 old = target.optional(path)
                 if (old is not None and old != content.encode()) or path.startswith('wiki/synthesis/'):
                     rid = sha((sid + path).encode())[:16]

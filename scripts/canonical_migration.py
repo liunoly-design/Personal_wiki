@@ -43,7 +43,7 @@ def plan(vault, destination):
             if marker not in current:
                 heading = '完整中文正文' if translated is not None else '归档全文'
                 changes[page] = current.rstrip() + f'\n\n{marker}\n\n## {heading}\n\n{body.strip()}\n\n[归档原文](../../{rawpath})\n'
-            sources[record['url']] = dict(status='complete', sourceId=sid, source=str(root.path / page),
+            sources[record['url']] = dict(status='published_unverified', sourceId=sid, source=str(root.path / page), relativeSource=page,
                 files=[page, rawpath], assets={f'raw/assets/{sid}/{p}': h for p, h in record['hashes'].items()}, reviews=[])
         for p in sorted((root.path / 'glossary').glob('*.md')):
             old = str(p.relative_to(root.path))
@@ -122,7 +122,16 @@ def apply(vault, destination, cleanup=False):
             for path, digest in p['hashes'].items():
                 if sha(root.read(path)) != digest:
                     raise ValueError('Published file changed; retain old copies')
+            complete_ids = set(json.loads(journal.optional('completed-source-ids.json') or '[]'))
+            protected_copies = set()
+            for source in p['sources'].values():
+                if source['sourceId'] not in complete_ids:
+                    slug = Path(source['source']).stem
+                    protected_copies.update([f'reading/{slug}.zh.md', f'raw/inputs/{slug}.md', f'raw/sources/collected/{slug}.md'])
+            cleaned = 0
             for path, digest in p['deletes'].items():
+                if path in protected_copies:
+                    continue
                 current = root.optional(path)
                 if current is None:
                     continue
@@ -130,47 +139,65 @@ def apply(vault, destination, cleanup=False):
                     raise ValueError('Old file changed; retain it')
                 fd, name = root.parent(path)
                 try:
-                    os.unlink(name, dir_fd=fd)
-                    os.fsync(fd)
+                    backup_fd, backup_name = journal.parent('removed/' + path, create=True)
+                    try:
+                        if journal.optional('removed/' + path) is not None:
+                            raise ValueError('Cleanup recovery exists; inspect before retry')
+                        os.rename(name, backup_name, src_dir_fd=fd, dst_dir_fd=backup_fd)
+                        os.fsync(fd); os.fsync(backup_fd)
+                        if sha(journal.read('removed/' + path)) != digest:
+                            try:
+                                os.link(backup_name, name, src_dir_fd=backup_fd, dst_dir_fd=fd, follow_symlinks=False)
+                            except FileExistsError:
+                                pass
+                            raise ValueError('Concurrent edit retained during cleanup')
+                    finally:
+                        os.close(backup_fd)
                 finally:
                     os.close(fd)
+                cleaned += 1
             for directory in ['reading', 'raw/inputs', 'raw/sources/collected', 'glossary']:
                 try:
                     (root.path / directory).rmdir()
                 except (FileNotFoundError, OSError):
                     pass
-            return {'cleaned': len(p['deletes'])}
+            return {'cleaned': cleaned, 'retained': len(set(p['deletes']) & protected_copies)}
         # Check all existing files before any replacements.
         for path, content in p['changes'].items():
             current = root.optional(path)
             if current == content.encode():
                 continue
-            if (sha(current) if current is not None else None) != p['before'][path]:
+            displaced = journal.optional('displaced/' + path)
+            actual = current if current is not None else displaced
+            if (sha(actual) if actual is not None else None) != p['before'][path]:
                 raise ValueError('Concurrent edit; migration stopped: ' + path)
         for path, content in p['changes'].items():
             current = root.optional(path)
             if current == content.encode():
                 continue
             if current is None:
+                displaced = journal.optional('displaced/' + path)
+                if displaced is not None and sha(displaced) != p['before'][path]:
+                    raise ValueError('Displaced page changed; retain for recovery')
                 root.immutable(path, content.encode())
             else:
-                # Explicit migration, backed up above, with a final comparison.
-                fd, name = root.parent(path)
-                temp = '.migration-' + sha(path.encode())[:16]
+                displaced = 'displaced/' + path
+                srcfd, srcname = root.parent(path)
+                dstfd, dstname = journal.parent(displaced, create=True)
                 try:
-                    if sha(root.read(path)) != p['before'][path]:
-                        raise ValueError('Concurrent edit; migration stopped')
-                    stream = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
-                    with os.fdopen(stream, 'wb') as f:
-                        f.write(content.encode()); f.flush(); os.fsync(f.fileno())
-                    os.replace(temp, name, src_dir_fd=fd, dst_dir_fd=fd)
-                    os.fsync(fd)
+                    if journal.optional(displaced) is None:
+                        os.rename(srcname, dstname, src_dir_fd=srcfd, dst_dir_fd=dstfd)
+                        os.fsync(srcfd); os.fsync(dstfd)
+                    actual = journal.read(displaced)
+                    if sha(actual) != p['before'][path]:
+                        try:
+                            os.link(dstname, srcname, src_dir_fd=dstfd, dst_dir_fd=srcfd, follow_symlinks=False)
+                        except FileExistsError:
+                            pass
+                        raise ValueError('Concurrent edit retained in migration recovery: ' + path)
+                    root.immutable(path, content.encode())
                 finally:
-                    try:
-                        os.unlink(temp, dir_fd=fd)
-                    except FileNotFoundError:
-                        pass
-                    os.close(fd)
+                    os.close(srcfd); os.close(dstfd)
         return {'published': len(p['changes'])}
     finally:
         os.close(lock); os.close(root.fd); os.close(journal.fd)
