@@ -15,11 +15,13 @@ function units(markdown){
    if(rest)result.push({text:rest});
   }
  };
- let prose='',code='',fence;
+ let prose='',code='',fence,fenceQuoteDepth=0;
  for(const line of markdown.match(/[^\n]*\n|[^\n]+$/gu)??[]){
-  const marker=line.replace(/^(?:[ \t]*>[ \t]?)+/u,'').match(/^ {0,3}(`{3,}|~{3,})([^\n]*)/u);
-  if(fence){code+=line;if(marker&&marker[1][0]===fence[0]&&marker[1].length>=fence.length&&!marker[2].trim()){result.push({literal:code});code='';fence=undefined;}}
-  else if(marker){paragraph(prose);prose='';fence=marker[1];code=line;}
+  const quotePrefix=line.match(/^(?:[ \t]*>[ \t]?)+/u)?.[0]??'';
+  const quoteDepth=(quotePrefix.match(/>/gu)??[]).length;
+  const marker=line.slice(quotePrefix.length).match(/^ {0,3}(`{3,}|~{3,})([^\n]*)/u);
+  if(fence){code+=line;if(marker&&quoteDepth===fenceQuoteDepth&&marker[1][0]===fence[0]&&marker[1].length>=fence.length&&!marker[2].trim()){result.push({literal:code});code='';fence=undefined;}}
+  else if(marker){paragraph(prose);prose='';fence=marker[1];fenceQuoteDepth=quoteDepth;code=line;}
   else prose+=line;
  }
  if(code)result.push({literal:code});paragraph(prose);

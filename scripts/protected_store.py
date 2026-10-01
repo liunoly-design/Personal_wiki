@@ -190,16 +190,24 @@ def rewrite_attachments(body, record, base):
     def prose(text):
         text = re.sub(r'(\]\([ \t]*)(<[^>\n]+>|[^\s)]+)', rewrite_link, text)
         return re.sub(r'(^[ \t]{0,3}\[[^]\n]+\]:[ \t]*)(<[^>\n]+>|[^\s]+)', rewrite_link, text, flags=re.M)
+    return rewrite_prose(body, prose)
+
+
+def rewrite_prose(body, prose):
     # Code examples are content, not attachment links. Preserve their bytes.
-    result, fence = [], None
+    result, fence, fence_quote_depth = [], None, 0
     for line in body.splitlines(keepends=True):
-        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line.rstrip('\r\n'))
+        quote = re.match(r'^(?:[ \t]*>[ \t]?)+', line)
+        prefix = quote[0] if quote else ''
+        quote_depth = prefix.count('>')
+        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line[len(prefix):].rstrip('\r\n'))
         if fence:
             result.append(line)
-            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+            if marker and quote_depth == fence_quote_depth and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
                 fence = None
         elif marker:
             fence = marker[1]
+            fence_quote_depth = quote_depth
             result.append(line)
         else:
             cursor = 0

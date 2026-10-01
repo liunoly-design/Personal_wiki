@@ -2,7 +2,7 @@
 """Publish staged results without replacing any existing user content."""
 import json, os, re, sys, posixpath
 from pathlib import Path
-from protected_store import Root, encode, sha, verify, rewrite_attachments
+from protected_store import Root, encode, sha, verify, rewrite_attachments, rewrite_prose
 
 
 def rewrite_links(body, path, mapping):
@@ -10,9 +10,10 @@ def rewrite_links(body, path, mapping):
         bare, separator, fragment = value.partition('#')
         normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), bare))
         return posixpath.relpath(mapping[normalized], posixpath.dirname(path)) + (separator + fragment if separator else '') if normalized in mapping else value
-    body = re.sub(r'(\]\(<?)([^\s)>]+)', lambda m: m[1] + target(m[2]), body)
-    body = re.sub(r'(?m)^(\s*\[[^\]]+\]:\s*<?)([^\s>]+)', lambda m: m[1] + target(m[2]), body)
-    return body
+    def prose(text):
+        text = re.sub(r'(\]\(<?)([^\s)>]+)', lambda m: m[1] + target(m[2]), text)
+        return re.sub(r'(?m)^(\s*\[[^\]]+\]:\s*<?)([^\s>]+)', lambda m: m[1] + target(m[2]), text)
+    return rewrite_prose(body, prose)
 
 
 def publish(request):
@@ -60,7 +61,7 @@ def publish(request):
             raw = raw.rstrip() + f'\n\n{origin}\n'
             reading = staging.read(f'reading/{slug}.zh.md').decode()
             reading = re.sub(r'^---\n.*?\n---\n', '', reading, count=1, flags=re.S)
-            reading = reading.replace('../raw/assets/', '../../raw/assets/')
+            reading = rewrite_prose(reading, lambda text: re.sub(r'(\]\([ \t]*<?|^[ \t]{0,3}\[[^]\n]+\]:[ \t]*<?)\.\./raw/assets/', r'\1../../raw/assets/', text, flags=re.M))
             card = staging.read(f'wiki/sources/{slug}.md').decode()
             body = f'{card.rstrip()}\n\n## 完整中文正文\n\n{reading.strip()}\n\n[归档原文](../../raw/sources/{name}.md)\n'
             mapping = {f'wiki/sources/{slug}.md': f'wiki/sources/{name}.md', f'raw/sources/{slug}.md': f'raw/sources/{name}.md', f'raw/inputs/{slug}.md': f'raw/sources/{name}.md', f'reading/{slug}.zh.md': f'wiki/sources/{name}.md'}
