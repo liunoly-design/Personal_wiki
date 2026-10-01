@@ -5,6 +5,7 @@ import json
 import socket
 import ssl
 import time
+import os
 from pathlib import Path
 from urllib.parse import urlsplit, urljoin
 from bs4 import BeautifulSoup
@@ -36,7 +37,8 @@ def fetch_public(url, limit, dest):
     current = url
     for _ in range(6):
         u, addresses = public_addresses(current)
-        for attempt in range(5):
+        attempts=1 if os.environ.get('WIKI_QUEUE_MANAGED')=='1' else 5
+        for attempt in range(attempts):
             connection = PinnedHTTPS(u.hostname, addresses[attempt % len(addresses)])
             try:
                 connection.request('GET', (u.path or '/') + ('?' + u.query if u.query else ''), headers={'User-Agent': 'PersonalWiki/0.4.1', 'Accept-Encoding': 'identity'})
@@ -54,7 +56,7 @@ def fetch_public(url, limit, dest):
                 dest.write_bytes(data)
                 return current
             except (OSError, http.client.HTTPException):
-                if attempt == 4: raise
+                if attempt == attempts-1: raise
                 time.sleep(min(2 ** attempt, 8))
             finally:
                 connection.close()

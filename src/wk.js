@@ -3,6 +3,9 @@ import {join} from 'node:path';
 
 export function parseCommand(text) {
  if(typeof text!=='string')return null;
+ const control=text.match(/^小婕\s*wk\s+(状态|继续|登录继续|补附件|确认视频)\s*[：:]\s*([a-f0-9]{64})(?:\s+([a-f0-9]{16}))?(?:\s+([a-f0-9]{64}))?\s*$/u);
+ if(control){const [,mode,jobId,assetId,fingerprint]=control;if((['补附件','确认视频'].includes(mode)!==Boolean(assetId))||(mode==='确认视频')!==Boolean(fingerprint))return{action:'invalid'};return{action:'control',mode,jobId,assetId,fingerprint};}
+ if(/^小婕\s*wk\s+(状态|继续|登录继续|补附件|确认视频)/u.test(text))return{action:'invalid'};
  const match=text.match(/^小婕[ \t]*(?:(?:wk[ \t]+(记录|查询|讨论))|(重新收集|收集))([ \t]*[：:]|[ \t]|(?=\n|https?:\/\/|$))([\s\S]*)$/iu);
  if(!match)return /^小婕\s+wk(?:\s|[：:])/iu.test(text)?{action:'invalid'}:null;
  if(['查询','讨论'].includes(match[1]))return {action:'reserved',mode:match[1]};

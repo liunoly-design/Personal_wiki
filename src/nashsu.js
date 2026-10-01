@@ -7,7 +7,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile);
 const root=resolve(import.meta.dirname,'..');
-export function createAdapters({vault,python,captureDirectory,flash,refresh=false,codexBinary,compilerModel,reading=false,publishSources=false,translate=codexTranslator(codexBinary),generate=createCodex({binary:codexBinary,model:compilerModel})}){
+export function createAdapters({vault,python,captureDirectory,browserProfile,flash,refresh=false,codexBinary,compilerModel,reading=false,publishSources=false,translate=codexTranslator(codexBinary),generate=createCodex({binary:codexBinary,model:compilerModel})}){
  return {
   ...flash,
   async retryReading(sourceId,signal){
@@ -38,7 +38,7 @@ export function createAdapters({vault,python,captureDirectory,flash,refresh=fals
    try{await readFile(page);return {status:'existing',source:page};}catch(e){if(e.code!=='ENOENT')throw e;return {status:'pending',source:found.source};}
   },
   async capture(url,signal){
-   const {stdout}=await exec(python,[join(root,'scripts/capture_article.py'),'--url',url,'--output',captureDirectory],{signal,timeout:900000,maxBuffer:1024*1024});
+   const {stdout}=await exec(python,[join(root,'scripts/capture_article.py'),'--url',url,'--output',captureDirectory,...(browserProfile?['--browser-profile',browserProfile]:[])],{signal,env:{...process.env,WIKI_QUEUE_MANAGED:'1'},timeout:900000,maxBuffer:1024*1024});
    const receipt=JSON.parse(stdout);return {...receipt,text:await readFile(join(receipt.directory,'article.md'),'utf8')};
   },
   async importAndCompile({capture,slug,context,url,signal,onStage=async()=>{}}){

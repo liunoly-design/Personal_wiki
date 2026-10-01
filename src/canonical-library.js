@@ -1,7 +1,9 @@
-import {mkdir,readFile,writeFile,readdir} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,readdir,copyFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
-import {spawn} from 'node:child_process';
+import {spawn,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+const exec=promisify(execFile);
 import {createAdapters} from './nashsu.js';
 import {createCodex} from './codex.js';
 import {codexTranslator} from './chinese-reading.js';
@@ -40,6 +42,24 @@ export async function collectCanonical(options){
  const saved=pendingPublication??(!options.refresh?options.previousResult:null);
  const verifyReuse=async result=>{await verifyPublication({...result,files:Object.fromEntries(Object.entries(result.files).filter(([path])=>path.startsWith('raw/')))},{vault,api});await api.read('wiki/sources/'+result.source.split('/').at(-1));};
  const attachRequestBackground=async result=>{const {userRecord,...sourceResult}=result;if(!options.background)return sourceResult;const note=await publishBundle({vault,background:options.background,requestId:options.requestId,source:result.source},{python,signal});await verifyPublication(note,{vault,api});return {...sourceResult,userRecord:note.source};};
+ if(pendingPublication?.resumableMedia&&options.mediaAction){
+  await verifyPublication(pendingPublication,{vault,api});
+  const directory=pendingPublication?.captureDirectory??join(workspace,'capture','package');
+  const approvalsPath=join(workspace,'media-approvals.json');await saveJSON(approvalsPath,options.mediaApprovals??{});
+  const resumed=options.resumeAttachments?await options.resumeAttachments({directory,...options.mediaAction,approvals:options.mediaApprovals??{},signal}):JSON.parse((await exec(python,[resolve(import.meta.dirname,'../scripts/attachment_resume.py'),'--directory',directory,'--asset',options.mediaAction.assetId,'--approvals',approvalsPath,...(options.mediaAction.resetAttempts?['--cycle',options.mediaAction.cycle??'direct']:[])],{signal,timeout:900000,maxBuffer:1024*1024})).stdout);
+  const supplements=[...(pendingPublication.supplements??[])];
+  for(const asset of resumed.assets??[]){
+   if(asset.status!=='downloaded'||!pendingPublication.missingAssets?.some(a=>a.id===asset.id))continue;
+   await api.assertPublisherReady?.();
+   const added=await publishBundle({operation:'supplement',vault,sourceId:pendingPublication.sourceId,source:pendingPublication.source,directory,asset},{python,signal});
+   await verifyPublication(added,{vault,api});
+   pendingPublication.files={...pendingPublication.files,...added.files};pendingPublication.assets={...pendingPublication.assets,...added.assets};
+   if(!supplements.includes(added.supplement))supplements.push(added.supplement);
+  }
+  Object.assign(pendingPublication,{status:resumed.status,attachmentStatus:resumed.status,missingAssets:resumed.missingAssets,supplements});
+  await saveJSON(join(workspace,'published.json'),pendingPublication);await verifyPublication(pendingPublication,{vault,api});
+  return attachRequestBackground(pendingPublication);
+ }
  if(saved){await onStage('verifying');if(pendingPublication)await verifyPublication(saved,{vault,api});else await verifyReuse(saved);return attachRequestBackground(saved);}
  // Memoize successful expensive calls before continuing to the next stage.
  const memo=(name,fn)=>async(input,...rest)=>{
@@ -52,11 +72,23 @@ export async function collectCanonical(options){
   try{const data=await readFile(join(vault,path));await mkdir(join(staging,path,'..'),{recursive:true});await writeFile(join(staging,path),data,{flag:'wx'});}catch(e){if(!['ENOENT','EEXIST'].includes(e.code))throw e;}
  }
  const flash={extract:memo('extract',async(...args)=>{const value=await options.flash.extract(...args);if(!validSlug(value.slug))throw Error('Invalid source name');return {...value,terms:[]};}),explain:memo('explain',options.flash.explain)};
- const adapters=createAdapters({vault:staging,python,captureDirectory:join(workspace,'capture'),flash,reading:true,
+ const adapters=createAdapters({vault:staging,python,captureDirectory:join(workspace,'capture'),browserProfile:options.browserProfile,flash,reading:true,
   generate:memo('generate',async input=>{const value=await (options.generate??createCodex({binary:options.codexBinary,model:options.compilerModel}))(input);if(input.stage==='generation'){const parsed=parseFileBlocks(value);if(parsed.warnings.length||parsed.truncatedPaths.length||!parsed.blocks.length||parsed.blocks.some(b=>b.path!=='wiki/log.md'&&!/^wiki\/(sources|concepts|entities|topics|synthesis)\/[a-z][a-z0-9-]*\.md$/u.test(b.path))||!parsed.blocks.some(b=>b.path==='wiki/sources/'+input.sourceName+'.md')){await saveJSON(join(workspace,'rejected-generation.json'),{sourceName:input.sourceName,paths:parsed.blocks.map(b=>b.path),warnings:parsed.warnings,value});throw Error('Incomplete or unsafe generation; rejected response retained for diagnosis');}}return value;}),
   translate:options.translate??codexTranslator(options.codexBinary)});
- const capture=options.capture??(options.text!==undefined?async()=>{const directory=join(workspace,'capture','package');await mkdir(directory,{recursive:true});await writeFile(join(directory,'article.md'),options.text);return {directory,text:options.text,status:'complete'};}:adapters.capture);
- const captured=await memo('capture',async(...args)=>{const value=await capture(...args);if(value.status!=='complete'&&!(value.publicBlog&&value.status==='partial'))throw Error('Attachments incomplete; retry required');return value;})(url,signal);
+ const capture=options.capture??(options.text!==undefined?async()=>{const directory=pendingPublication?.captureDirectory??join(workspace,'capture','package');await mkdir(directory,{recursive:true});await writeFile(join(directory,'article.md'),options.text);return {directory,text:options.text,status:'complete'};}:adapters.capture);
+ const captured=await memo('capture',async(...args)=>{const value=await capture(...args);if(value.status!=='complete'&&!((value.publicBlog||value.resumableMedia)&&value.status==='partial'))throw Error('Attachments incomplete; retry required');return value;})(url,signal);
+ const originals=captured.directory;
+ // Freeze only complete files once. Interrupted media bytes stay outside Raw.
+ if(captured.resumableMedia){
+  const frozen=join(workspace,'snapshot');await mkdir(frozen,{recursive:true});
+  const hashes=await captureHashes(originals);
+  for(const [path,hash] of Object.entries(hashes)){
+   if(path.includes('.part')||path.endsWith('.tmp')||captured.missingAssets?.some(a=>a.path===path))continue;
+   const dest=join(frozen,path);await mkdir(join(dest,'..'),{recursive:true});
+   try{await copyFile(join(originals,path),dest,1);}catch(e){if(e.code!=='EEXIST')throw e;}
+  }
+  captured.directory=frozen;
+ }
  const snapshotHashes=await captureHashes(captured.directory);
  const priorHashes=options.previousResult?.snapshotHashes??(options.previousResult?.assets?Object.fromEntries(Object.entries(options.previousResult.assets).map(([path,hash])=>[path.split('/').slice(3).join('/'),hash])):null);
  if(options.refresh&&priorHashes&&JSON.stringify(Object.entries(snapshotHashes).sort())===JSON.stringify(Object.entries(priorHashes).sort())){
@@ -68,12 +100,12 @@ export async function collectCanonical(options){
  delete adapters.lookupExisting;
  let result=await recordArticle({url,vault:staging,signal,onStage,sourceContext:options.text!==undefined?'来源是用户粘贴的资料。text.personal-wiki.invalid 是本机内容标识，不是网页出处，不得虚构原作者或原网页。':''},adapters);
  if(result.reading?.status!=='complete')throw Error(result.reading?.reason??'Chinese reading incomplete; retry required');
- if(result.attachmentStatus!=='complete'&&!captured.publicBlog)throw Error('Attachments incomplete; retry required');
+ if(result.attachmentStatus!=='complete'&&!captured.publicBlog&&!captured.resumableMedia)throw Error('Attachments incomplete; retry required');
  await api.assertPublisherReady?.();
  await onStage('publishing');
  const compiled=result;
- result=await publishBundle({vault,staging,sourceId:result.sourceId},{python,signal});
- result={...result,title:compiled.title??result.title,summary:compiled.summary??null,snapshotHashes,attachmentStatus:captured.status,missingAssets:captured.missingAssets??[]};await saveJSON(join(workspace,'published.json'),result);
+ result=await publishBundle({vault,staging,sourceId:result.sourceId,missingAssets:captured.missingAssets??[],contextGaps:captured.contextGaps??[]},{python,signal});
+ result={...result,title:compiled.title??result.title,summary:compiled.summary??null,snapshotHashes,captureDirectory:originals,status:captured.resumableMedia&&captured.status==='partial'?'partial':'complete',resumableMedia:captured.resumableMedia===true,contextStatus:captured.contextStatus??'complete',contextGaps:captured.contextGaps??[],attachmentStatus:captured.status,missingAssets:captured.missingAssets??[]};await saveJSON(join(workspace,'published.json'),result);
  await onStage('verifying');await verifyPublication(result,{vault,api});
  return attachRequestBackground(result);
 }

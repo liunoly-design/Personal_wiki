@@ -7,7 +7,8 @@ import sys
 def extract_public(url):
     result = subprocess.run([sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist', '--skip-download', '--dump-single-json', '--retries', '0', '--extractor-retries', '0', '--socket-timeout', '30', '--no-warnings', url], capture_output=True, text=True, timeout=120)
     if result.returncode:
-        raise ValueError('Public media metadata unavailable; login may be required')
+        if any(word in result.stderr.lower() for word in ('login required','sign in','captcha','http error 401','http error 403','cookies are required')):raise ValueError('login/captcha required; public media unavailable')
+        raise OSError('Public media metadata unavailable; network/extractor failure')
     return json.loads(result.stdout)
 
 

@@ -109,7 +109,8 @@
     "tools": [
       "wiki_record",
       "wiki_status",
-      "wiki_retry_translation"
+      "wiki_retry_translation",
+      "wiki_resume"
     ]
   }
 }

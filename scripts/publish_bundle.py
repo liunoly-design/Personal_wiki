@@ -18,6 +18,28 @@ def rewrite_links(body, path, mapping):
 
 def publish(request):
     target = Root(request['vault'])
+    if request.get('operation')=='supplement':
+        lock=target.lock()
+        try:
+            sid=request['sourceId'];asset=request['asset'];aid=asset['id']
+            if not re.fullmatch('[a-f0-9]{20}',sid) or not re.fullmatch('[a-f0-9]{16}',aid):raise ValueError('Invalid supplement ID')
+            source=str(Path(request['source']).relative_to(target.path))
+            if not re.fullmatch(r'wiki/sources/[a-z][a-z0-9-]*\.md',source):raise ValueError('Invalid supplement source')
+            relative=asset['path']
+            if Path(relative).is_absolute() or '..' in Path(relative).parts:raise ValueError('Unsafe attachment')
+            root=Root(request['directory'])
+            try:data=root.read(relative)
+            finally:os.close(root.fd)
+            digest=sha(data)
+            if asset.get('sha256') and asset['sha256']!=digest:raise ValueError('Attachment hash mismatch')
+            path=f'raw/assets/{sid}/supplements/{aid}/'+Path(relative).name
+            target.immutable(path,data)
+            page=f'wiki/queries/media-{sid}-{aid}.md'
+            body=f'# 附件补充记录\n\n[原来源卡](../../{source})\n\n附件 {aid}：[下载附件](../../{path})\n\n帖子来源：{asset.get("post_url") or asset.get("url")}\n\nSHA256：{digest}\n\n原文与原来源卡保持不变；此附件由独立续作取得。\n'
+            target.immutable(page,body.encode())
+            return dict(files={page:sha(body.encode())},assets={path:digest},supplement=page)
+        finally:
+            os.close(lock);os.close(target.fd)
     if 'background' in request:
         lock = target.lock()
         try:
@@ -64,6 +86,9 @@ def publish(request):
             reading = rewrite_prose(reading, lambda text: re.sub(r'(\]\([ \t]*<?|^[ \t]{0,3}\[[^]\n]+\]:[ \t]*<?)\.\./raw/assets/', r'\1../../raw/assets/', text, flags=re.M))
             card = staging.read(f'wiki/sources/{slug}.md').decode()
             body = f'{card.rstrip()}\n\n## 完整中文正文\n\n{reading.strip()}\n\n[归档原文](../../raw/sources/{name}.md)\n'
+            if request.get('missingAssets'):
+                body+='\n## 附件尚未完成\n\n'+ '\n'.join(f'- {a.get("id", "未编号")}：{a.get("kind", "附件")}；{a.get("status", "failed")}；{a.get("post_url") or a.get("url", "")}' for a in request['missingAssets'])+'\n\n后续补下载记录单独保存，原文和本页不被覆盖。以任务状态及附件补充记录为准。\n'
+            if request.get('contextGaps'):body+='\n## 上下文缺失\n\n'+'\n'.join('- '+v for v in request['contextGaps'])+'\n'
             mapping = {f'wiki/sources/{slug}.md': f'wiki/sources/{name}.md', f'raw/sources/{slug}.md': f'raw/sources/{name}.md', f'raw/inputs/{slug}.md': f'raw/sources/{name}.md', f'reading/{slug}.zh.md': f'wiki/sources/{name}.md'}
             body = rewrite_links(body, f'wiki/sources/{name}.md', mapping)
             files = {f'raw/sources/{name}.md': raw, f'wiki/sources/{name}.md': body}

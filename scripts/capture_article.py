@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Capture one supported public URL. No account cookies or browser bypass."""
 import argparse
+import http.client
 import copy
 import json
 import subprocess
@@ -18,32 +19,12 @@ except ImportError:
 
 
 def request(url, hosts, limit, dest):
-    current=url
-    for redirect in range(6):
-        if urlsplit(current).scheme!='https' or urlsplit(current).hostname not in hosts:
-            raise ValueError('Unsupported redirect or media host')
-        for attempt in range(5):
-            try:
-                with httpx.Client(timeout=45,follow_redirects=False) as client:
-                    with client.stream('GET',current) as r:
-                        if r.status_code in [301,302,303,307,308]:
-                            current=str(r.url.join(r.headers['location']));break
-                        r.raise_for_status()
-                        length=int(r.headers.get('content-length','0'))
-                        if length>limit:raise ValueError('Media exceeds download limit; waiting for confirmation')
-                        size=0
-                        with dest.open('wb') as f:
-                            for block in r.iter_bytes():
-                                size+=len(block)
-                                if size>limit:raise ValueError('Media reached download limit; waiting for confirmation')
-                                f.write(block)
-                        return
-            except (httpx.TransportError,httpx.HTTPStatusError) as error:
-                if isinstance(error,httpx.HTTPStatusError) and error.response.status_code not in [408,429,500,502,503,504]:raise
-                if attempt==4:raise
-                time.sleep(min(2**attempt,8))
-        else:raise ValueError('Fetch failed')
-    raise ValueError('Too many redirects')
+    if urlsplit(url).hostname not in hosts:raise ValueError('Unsupported media host')
+    try:
+        from .attachment_resume import download
+    except ImportError:
+        from attachment_resume import download
+    download(url,dest,limit=limit)
 
 
 def select_target_article(soup, url):
@@ -87,15 +68,42 @@ def wechat_video_pending(metadata, html):
     return any('v.qq.com/' in (n.get('src','')+n.get('data-src','')) or 'video_player' in (n.get('src','')+n.get('data-src','')) for n in body.select('iframe'))
 
 
-def capture(url, output):
+def capture(url, output, browser_profile=None):
     out=Path(output);out.mkdir(parents=True,exist_ok=True)
     receipt=out/'capture-result.json'
     if receipt.exists():
         previous=json.loads(receipt.read_text())
-        if previous.get('status')=='complete':return previous
+        if previous.get('status')=='complete' or (previous.get('resumableMedia') and (Path(previous['directory'])/'article.md').exists()):return previous
     host=urlsplit(url).hostname
-    if host=='mp.weixin.qq.com':
-        config=out/'wechat.toml';config.write_text('[platforms.wechat]\nbrowser = "http"\n[output]\nsave_debug_html = "always"\noverwrite = false\n')
+    if browser_profile:
+        try:
+            from .browser_session import browser_html
+        except ImportError:
+            from browser_session import browser_html
+        def session_request(u,hosts,limit,dest):
+            if urlsplit(u).hostname in ('x.com','twitter.com','mp.weixin.qq.com'):
+                dest.write_text(browser_html(u,browser_profile));return
+            request(u,hosts,limit,dest)
+    else:session_request=request
+    if host=='mp.weixin.qq.com' and browser_profile:
+        directory=out/'package';directory.mkdir(exist_ok=True)
+        html=browser_html(url,browser_profile);(directory/'raw.html').write_text(html)
+        soup=BeautifulSoup(html,'html.parser');body=soup.select_one('#js_content')
+        if body is None or not body.get_text(strip=True):raise ValueError('login/captcha required; WeChat content unavailable')
+        assets=[]
+        for index,n in enumerate(body.select('img'),1):
+            remote=n.get('data-src') or n.get('src');relative=f'images/image-{index:02}.jpg'
+            if remote:assets.append(dict(kind='image',url=remote,path=relative,status='ready'));n['src']=relative
+        for index,n in enumerate(body.select('video,iframe.video_iframe,mp-common-videosnap'),1):
+            assets.append(dict(kind='video',url=n.get('src') or n.get('data-src') or url,path=f'videos/video-{index:02}.mp4',status='waiting_metadata'))
+        try:
+            from .attachment_resume import resume_assets
+        except ImportError:
+            from attachment_resume import resume_assets
+        (directory/'manifest.json').write_text(json.dumps(dict(source_url=url,assets=assets)))
+        result=resume_assets(directory,initial=True);(directory/'article.md').write_text(markdownify(str(body),heading_style='ATX'))
+    elif host=='mp.weixin.qq.com':
+        config=out/'wechat.toml';config.write_text('[platforms.wechat]\nbrowser = "http"\n[fetch]\nbrowser_attempts = 1\n[output]\nsave_debug_html = "always"\noverwrite = false\n')
         cmd=[str(Path(sys.executable).parent/'magicmd'),'convert',url,'--config',str(config),'--output',str(out/'packages'),'--debug']
         r=subprocess.run(cmd,capture_output=True,text=True,timeout=180)
         (out/'fetch.log').write_text(r.stdout+r.stderr)
@@ -110,16 +118,35 @@ def capture(url, output):
         missing=[x for x in images if x and (not x.get('local_path') or not (directory/x['local_path']).is_file())]
         html='\n'.join(p.read_text(errors='replace') for p in directory.glob('*.html'))
         video_pending=wechat_video_pending(metadata,html)
-        result={'directory':str(directory.resolve()),'status':'partial' if missing or video_pending else 'complete','video_status':'waiting_for_supported_download' if video_pending else 'not_detected'}
+        import shutil
+        normalized=out/'package'
+        if not normalized.exists():shutil.copytree(directory,normalized)
+        directory=normalized
+        try:
+            from .attachment_resume import identify
+        except ImportError:
+            from attachment_resume import identify
+        assets=[]
+        for i,x in enumerate(v for v in images if v):
+            relative=x.get('local_path') or f'images/missing-{i:02}.jpg'
+            assets.append(identify(dict(kind='image',url=x.get('source_url'),path=relative,status='downloaded' if (directory/relative).is_file() else 'failed'),url))
+        if video_pending:
+            assets.append(identify(dict(kind='video',url=url,path='videos/pending.mp4',status='waiting_metadata',error='WeChat video metadata unavailable'),url))
+        # Deduplicate cover/body references by path, keeping the image mapping.
+        assets=list({a['path']:a for a in assets}.values())
+        (directory/'manifest.json').write_text(json.dumps(dict(source_url=url,assets=assets),ensure_ascii=False,indent=2))
+        result={'directory':str(directory.resolve()),'status':'partial' if missing or video_pending else 'complete','resumableMedia':True,'missingAssets':[a for a in assets if a['status']!='downloaded'],'video_status':'waiting_for_supported_download' if video_pending else 'not_detected'}
     elif host in ['x.com','twitter.com']:
         directory=out/'package';directory.mkdir(exist_ok=True)
         raw=directory/'raw.html'
         media_info=None
         try:
-            request(url,{'x.com','www.x.com','twitter.com','www.twitter.com'},8*1024*1024,raw)
+            session_request(url,{'x.com','www.x.com','twitter.com','www.twitter.com'},8*1024*1024,raw)
             soup=BeautifulSoup(raw.read_text(),'html.parser')
+            if soup.select('input[type="password"], #captcha, [data-testid="LoginForm"]'):raise ValueError('login/captcha required')
             article=select_target_article(soup,url)
-        except (ValueError, httpx.HTTPError):
+        except (ValueError, OSError, http.client.HTTPException, httpx.HTTPError) as error:
+            if any(word in str(error).lower() for word in ('401','403','captcha')):raise
             media_info=extract_public(url)
             (directory/'extractor.json').write_text(json.dumps(media_info,ensure_ascii=False,indent=2))
             description=media_info.get('description')
@@ -133,37 +160,62 @@ def capture(url, output):
             try:
                 media_info=extract_public(url)
                 (directory/'extractor.json').write_text(json.dumps(media_info,ensure_ascii=False,indent=2))
-            except (ValueError, subprocess.TimeoutExpired):
+            except (ValueError, OSError, subprocess.TimeoutExpired):
                 pass
+        try:
+            from .x_context import collect_context
+        except ImportError:
+            from x_context import collect_context
+        if media_info is None:
+            context=collect_context(url,directory,lambda u,p:session_request(u,{'x.com','www.x.com','twitter.com','www.twitter.com'},8*1024*1024,p),soup)
+            soup=BeautifulSoup('<article></article>','html.parser');article=soup.article
+            for post in context['posts']:
+                section=soup.new_tag('section');section['data-post-url']=post['url']
+                heading=soup.new_tag('h2');heading.string=('引用帖：' if post.get('role')=='quote' else '串文：')+post['url'];section.append(heading)
+                link=soup.new_tag('a',href=post['url']);link.string='帖子来源';section.append(link)
+                section.append(BeautifulSoup(post['html'],'html.parser'));article.append(section)
+            if context['gaps']:
+                note=soup.new_tag('p');note.string='上下文缺失：'+'；'.join(context['gaps']);article.append(note)
+        else:
+            context={'posts':[], 'gaps':['公开媒体提取仅取得目标帖，无法确认完整串文与引用'], 'pages':[]}
+            paragraph=soup.new_tag('p');paragraph.string='上下文缺失：'+context['gaps'][0];article.append(paragraph)
         for n in article.select('button,nav,script,style'):n.decompose()
         assets=[]
         for n in list(article.select('img')):
             u=n.get('src','')
             if '/profile_images/' in u:n.decompose();continue
             rel='images/image-%02d%s'%(len(assets)+1,'.webp' if 'format=webp' in u else '.jpg')
-            assets.append({'url':u,'path':rel,'kind':'image'});n['src']=rel
+            assets.append({'url':u,'path':rel,'kind':'image','post_url':(n.find_parent('section') or {}).get('data-post-url',url)});n['src']=rel
         video_nodes=list(article.select('video'))
-        videos=video_assets(media_info) if media_info else []
-        if video_nodes and not media_info:
-            for node in video_nodes:
-                source=node.get('src') or (node.find('source') or {}).get('src','')
-                try:
-                    videos.append(direct_video_asset(source))
-                except (ValueError, httpx.HTTPError):
-                    videos.append({'kind':'video','status':'waiting','error':'Public video metadata unavailable','url':source or url})
-        for i,item in enumerate(videos):
-            item['path']='videos/video-%02d.mp4'%(i+1)
-            assets.append(item)
-            anchor=soup.new_tag('a',href=item.get('url',url));anchor.string='视频 %d（不转录）'%(i+1)
-            if i<len(video_nodes):video_nodes[i].replace_with(anchor)
-            else:
-                anchor.string+='（原位置无法确认）';article.append(anchor)
-        for node in video_nodes[len(videos):]:
-            assets.append({'kind':'video','status':'waiting','url':url,'path':'','error':'Unmatched original video node'})
-            anchor=soup.new_tag('a',href=url);anchor.string='视频（待处理）';node.replace_with(anchor)
+        for index,node in enumerate(video_nodes):
+            post=(node.find_parent('section') or {}).get('data-post-url',url)
+            source=node.get('src') or (node.find('source') or {}).get('src','')
+            try:
+                info=media_info if post==url and media_info else extract_public(post)
+                videos=video_assets(info)
+            except (ValueError,OSError,subprocess.TimeoutExpired):
+                try:videos=[direct_video_asset(source)]
+                except Exception:videos=[{'kind':'video','status':'waiting_metadata','error':'Public video metadata unavailable','url':source or post}]
+            for item in videos:
+                item['path']='videos/video-%02d.mp4'%(1+sum(a['kind']=='video' for a in assets));item['post_url']=post
+                assets.append(item)
+                anchor=soup.new_tag('a',href=item.get('url',post));anchor.string='视频（不转录）';node.insert_before(anchor)
+            node.decompose()
+        if not video_nodes and media_info:
+            for index,item in enumerate(video_assets(media_info),1):
+                item.update(path='videos/video-%02d.mp4'%index,post_url=url);assets.append(item)
+                anchor=soup.new_tag('a',href=item.get('url',url));anchor.string='视频（原位置无法确认；不转录）';article.append(anchor)
+        try:
+            from .attachment_resume import identify
+        except ImportError:
+            from attachment_resume import identify
+        assets=[identify(a,url) for a in assets]
         for a in assets:
-            if a.get('status')=='waiting':continue
-            dest=directory/a['path'];dest.parent.mkdir(exist_ok=True);temp=dest.with_suffix(dest.suffix+'.part')
+            if a.get('status') in ('waiting','waiting_metadata'):
+                if a.get('duration') and a.get('width') and a.get('height') and min(a['width'],a['height'])<=1080:a['status']='waiting_confirmation'
+                else:a['status']='waiting_metadata'
+                continue
+            dest=directory/a['path'];dest.parent.mkdir(exist_ok=True);temp=dest
             try:
                 request(a['url'],{'pbs.twimg.com','video.twimg.com'},1000000000 if a['kind']=='video' else 30000000,temp)
                 if a['kind']=='video':
@@ -174,19 +226,22 @@ def capture(url, output):
                     if not duration or not size:raise ValueError('Cannot verify video duration or resolution')
                     seconds=int(duration[1])*3600+int(duration[2])*60+float(duration[3])
                     if seconds>1800 or min(int(size[1]),int(size[2]))>1080:raise ValueError('Video exceeds duration/resolution limit; awaiting handling')
-                temp.rename(dest);a['status']='downloaded'
+                temp.rename(dest);a['status']='downloaded';a['attempts']=1
+                import hashlib
+                a['sha256']=hashlib.sha256(dest.read_bytes()).hexdigest()
                 if a['kind']=='video':
                     for anchor in article.select('a[href]'):
                         if anchor['href']==a['url']:anchor['href']=a['path']
-            except Exception:
-                a['status']='failed_or_waiting';a['error']='Media unavailable or exceeds limit; retained partial file for inspection'
+            except Exception as error:
+                a['attempts']=1;a['status']='waiting_confirmation' if 'confirmation' in str(error) or 'limit' in str(error) else 'failed';a['error']=str(error)
+                if a['status']=='waiting_confirmation':a['limitReached']=True
         # Failed attachments keep the original remote link, not a broken local link.
         body=markdownify(str(article),heading_style='ATX')
         for a in assets:
             if a['status']!='downloaded':body=body.replace(']('+a['path']+')',']('+a.get('url',url)+')')
         (directory/'article.md').write_text('---\nsource_url: '+json.dumps(url)+'\n---\n\n'+body)
-        (directory/'manifest.json').write_text(json.dumps({'source_url':url,'assets':assets},ensure_ascii=False,indent=2))
-        result={'directory':str(directory.resolve()),'status':'complete' if all(a['status']=='downloaded' for a in assets) else 'partial'}
+        (directory/'manifest.json').write_text(json.dumps({'source_url':url,'assets':assets,'context':context},ensure_ascii=False,indent=2))
+        result={'directory':str(directory.resolve()),'status':'complete' if all(a['status']=='downloaded' for a in assets) else 'partial','resumableMedia':True,'contextStatus':'partial' if context['gaps'] else 'complete','contextGaps':context['gaps'],'missingAssets':[a for a in assets if a['status']!='downloaded']}
     else:
         try:
             from .blog_capture import capture_blog
@@ -196,5 +251,5 @@ def capture(url, output):
     receipt.write_text(json.dumps(result));return result
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--output',required=True);a=p.parse_args()
-    print(json.dumps(capture(a.url,a.output),ensure_ascii=False))
+    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--output',required=True);p.add_argument('--browser-profile');a=p.parse_args()
+    print(json.dumps(capture(a.url,a.output,a.browser_profile),ensure_ascii=False))

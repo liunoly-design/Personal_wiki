@@ -61,3 +61,16 @@ test('a new short task uses the idle slot while an older task is still running',
 });
 
 async function awaitStart(started){await Promise.race([started,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('Independent task did not start')),5000);timer.unref();})]);}
+
+test('login waits survive restart without another network attempt or budget reset',async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'wiki-login-'));let runs=0;
+ const options={stateDir,python:'/usr/bin/python3',run:async()=>{runs++;throw Error('HTTP 401 login required');}};
+ let queue=await openTaskQueue(options);
+ try{await queue.enqueue(task);await queue.drain();await queue.close();queue=await openTaskQueue(options);await queue.drain();assert.equal(runs,1);assert.equal((await queue.status(task.id)).status,'waiting_login');await queue.retry(task.id);await queue.drain();assert.equal(runs,2);}finally{await queue.close();await rm(stateDir,{recursive:true,force:true});}
+});
+
+test('restart preserves five-attempt budget and repeated partial input points to original task',async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'wiki-budget-'));let runs=0,clock=0;
+ const options={stateDir,python:'/usr/bin/python3',now:()=>clock,run:async()=>{runs++;throw Error('network unavailable');}};let queue=await openTaskQueue(options);
+ try{await queue.enqueue(task);for(let i=0;i<5;i++){await queue.drain();clock+=4000000;}await queue.close();queue=await openTaskQueue(options);await queue.drain();assert.equal(runs,5);assert.equal((await queue.status(task.id)).attempts,5);}finally{await queue.close();await rm(stateDir,{recursive:true,force:true});}
+});
