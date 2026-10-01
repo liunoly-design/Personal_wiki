@@ -19,7 +19,7 @@ const previousDeployment=await readFile(join(state,'deployment.json'),'utf8').th
 const previous=previousDeployment.release??'/Users/mac/Documents/personal_OS/Personal-Wiki';
 config.plugins.load.paths=config.plugins.load.paths.map(p=>p===previous?release:p);
 if(!config.plugins.load.paths.includes(release))throw Error('Wiki installation path not found');
-entry.config={...entry.config,codexBinary:codex,compilerModel:'gpt-6-sol',wikiAgentId:'wiki'};
+entry.config={...entry.config,...(process.env.WIKI_FLASH_PROXY_URL?{flashProxyUrl:process.env.WIKI_FLASH_PROXY_URL}:{}),codexBinary:codex,compilerModel:'gpt-6-sol',wikiAgentId:'wiki'};
 // Record deployment separately: plugin schema does not accept arbitrary fields.
 const allow=config.agents?.entries?.wiki?.tools?.allow;
 if(Array.isArray(allow))config.agents.entries.wiki.tools.allow=[...new Set([...allow,'wiki_record','wiki_status','wiki_retry_translation'])];

@@ -62,6 +62,11 @@
       "wikiAgentId": {
         "type": "string",
         "default": "wiki"
+      },
+      "flashProxyUrl": {
+        "type": "string",
+        "pattern": "^https?://",
+        "description": "Optional proxy for Wiki Flash requests only; no global proxy changes."
       }
     },
     "allOf": [

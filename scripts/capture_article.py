@@ -47,11 +47,11 @@ def request(url, hosts, limit, dest):
 
 
 def select_target_article(soup, url):
-    target=urlsplit(url).path.rstrip('/')
+    target=urlsplit(url).path.rstrip('/').lower()
     candidates=[]
     for article in soup.select('article'):
         owned=[a for a in article.select('a[href]') if a.find_parent('article') is article]
-        if any(urlsplit(a['href']).path.rstrip('/')==target for a in owned):
+        if any(urlsplit(a['href']).path.rstrip('/').lower()==target for a in owned):
             candidates.append(article)
     # Duplicate wrapper markup may contain the same target again. Keep the
     # deepest matching target while retaining quotes inside it.

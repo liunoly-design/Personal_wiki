@@ -12,7 +12,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
  const account={...hostConfig.channels?.feishu,...hostConfig.channels?.feishu?.accounts?.[config.accountId]};
  if(!injectedFeishu&&(account.enabled===false||(account.domain&&account.domain!=='feishu')))throw Error('Feishu account unavailable');
  const feishu=injectedFeishu??createFeishuClient({credentials:()=>({appId:account.appId,appSecret:account.appSecret})});
- const flash=injectedFlash??createFlash({model:config.flashModel??'gemini-flash-latest',usagePath:join(config.stateDir,'flash-usage.jsonl')});
+ const flash=injectedFlash??createFlash({proxyUrl:config.flashProxyUrl,model:config.flashModel??'gemini-flash-latest',usagePath:join(config.stateDir,'flash-usage.jsonl')});
  let timer,running=false,closed=false;const controller=new AbortController();
  function checkScope(c){if(c.Provider!=='feishu'||c.AccountId!==config.accountId||!config.allowedSenderIds.includes(c.SenderId)||!config.allowedConversationIds.includes(c.NativeChannelId))throw Error('Wiki scope denied');}
  async function processJobs(){
@@ -93,6 +93,6 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
   },
   async start(){timer=setInterval(()=>{processJobs().catch(()=>{});},2000);timer.unref();processJobs().catch(()=>{});},
   processJobs,
-  async close(){closed=true;clearInterval(timer);controller.abort();while(running)await new Promise(r=>setTimeout(r,50));},
+  async close(){closed=true;clearInterval(timer);controller.abort();while(running)await new Promise(r=>setTimeout(r,50));await flash.close?.();},
  };
 }

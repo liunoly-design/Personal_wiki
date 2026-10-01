@@ -21,6 +21,10 @@ class TargetTest(unittest.TestCase):
     def test_different_target_bodies_remain_ambiguous(self):
         soup=BeautifulSoup('<article><a href="/a/status/1">target</a>one</article><article><a href="/a/status/1">target</a>two</article>','html.parser')
         with self.assertRaises(ValueError):select_target_article(soup,'https://x.com/a/status/1')
+    def test_author_case_does_not_hide_requested_post(self):
+        soup=BeautifulSoup('<article><a href="/ai_Goge/status/123">target</a>desired</article><article><a href="/ai_Goge/status/456">comment</a>wrong</article>','html.parser')
+        self.assertIn('desired',select_target_article(soup,'https://x.com/ai_goge/status/123?s=46').get_text())
+
     def test_unknown_target_fails(self):
         with self.assertRaises(ValueError):
             select_target_article(BeautifulSoup('<article>unidentified</article>','html.parser'),'https://x.com/a/status/1')
