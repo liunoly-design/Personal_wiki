@@ -90,7 +90,9 @@ def wechat_video_pending(metadata, html):
 def capture(url, output):
     out=Path(output);out.mkdir(parents=True,exist_ok=True)
     receipt=out/'capture-result.json'
-    if receipt.exists():return json.loads(receipt.read_text())
+    if receipt.exists():
+        previous=json.loads(receipt.read_text())
+        if previous.get('status')=='complete':return previous
     host=urlsplit(url).hostname
     if host=='mp.weixin.qq.com':
         config=out/'wechat.toml';config.write_text('[platforms.wechat]\nbrowser = "http"\n[output]\nsave_debug_html = "always"\noverwrite = false\n')

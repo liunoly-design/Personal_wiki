@@ -9,8 +9,8 @@ if(!entry?.config?.enabled)throw Error('Existing authorized Wiki installation re
 const state=entry.config.stateDir;
 const nashsuState=JSON.parse(await readFile(join(home,'Library/Application Support/com.llmwiki.app/app-state.json'),'utf8'));
 const project=Object.entries(nashsuState.projectRegistry??{}).find(([,p])=>p.path===entry.config.vault)?.[0];
-if(!project||!(nashsuState.sourceWatchConfig?.[project]?.excludeGlobs??[]).includes('raw/sources/collected/*'))throw Error('Apply nashsu source-watch exclusion before deploying');
-for(const name of await readdir(join(state,'jobs'))){if(!name.endsWith('.json'))continue;const j=JSON.parse(await readFile(join(state,'jobs',name),'utf8'));if(['queued','processing','delivery_pending'].includes(j.status))throw Error('Wait for active Wiki jobs before deploying');}
+if(!project||nashsuState.sourceWatchConfig?.[project]?.autoIngest!==false)throw Error('Disable duplicate automatic ingestion before deploying canonical library');
+for(const name of await readdir(join(state,'jobs')).catch(e=>{if(e.code==='ENOENT')return [];throw e;})){if(!name.endsWith('.json'))continue;const j=JSON.parse(await readFile(join(state,'jobs',name),'utf8'));if(['queued','processing','delivery_pending'].includes(j.status))throw Error('Wait for active Wiki jobs before deploying');}
 const codex='/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';await access(codex);
 execFileSync(entry.config.python,['-c','import httpx, bs4, markdownify, yt_dlp, imageio_ffmpeg'],{stdio:'ignore'});
 const release=join(state,'releases',packageInfo.version);
@@ -22,7 +22,7 @@ const previousDeployment=await readFile(join(state,'deployment.json'),'utf8').th
 const previous=previousDeployment.release??'/Users/mac/Documents/personal_OS/Personal-Wiki';
 config.plugins.load.paths=config.plugins.load.paths.map(p=>p===previous?release:p);
 if(!config.plugins.load.paths.includes(release))throw Error('Wiki installation path not found');
-entry.config={...entry.config,publishSources:true,...(process.env.WIKI_FLASH_PROXY_URL?{flashProxyUrl:process.env.WIKI_FLASH_PROXY_URL}:{}),codexBinary:codex,compilerModel:'gpt-6-sol',wikiAgentId:'wiki'};
+entry.config={...entry.config,canonicalLibrary:true,publishSources:false,...(process.env.WIKI_FLASH_PROXY_URL?{flashProxyUrl:process.env.WIKI_FLASH_PROXY_URL}:{}),codexBinary:codex,compilerModel:'gpt-6-sol',wikiAgentId:'wiki'};
 // Record deployment separately: plugin schema does not accept arbitrary fields.
 const allow=config.agents?.entries?.wiki?.tools?.allow;
 if(Array.isArray(allow))config.agents.entries.wiki.tools.allow=[...new Set([...allow,'wiki_record','wiki_status','wiki_retry_translation'])];

@@ -1,3 +1,4 @@
+import {openCanonicalRuntime} from './canonical-runtime.js';
 import {mkdir,readFile,writeFile,rename,readdir,link,unlink} from 'node:fs/promises';
 import {join,isAbsolute} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
@@ -7,6 +8,7 @@ import {createAdapters} from '../src/nashsu.js';
 import {createFeishuClient} from '../src/feishu-http.js';
 async function save(path,value){await writeFile(path+'.tmp',JSON.stringify(value,null,2),{mode:0o600});await rename(path+'.tmp',path);}
 export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeAdapters=createAdapters,flash:injectedFlash}){
+ if(config.canonicalLibrary)return openCanonicalRuntime({config,hostConfig,feishu:injectedFeishu,flash:injectedFlash});
  for(const key of ['vault','stateDir','python'])if(!isAbsolute(config[key]??''))throw Error('Absolute paths required');
  const jobs=join(config.stateDir,'jobs');await mkdir(jobs,{recursive:true,mode:0o700});
  const account={...hostConfig.channels?.feishu,...hostConfig.channels?.feishu?.accounts?.[config.accountId]};

@@ -72,6 +72,11 @@
         "type": "boolean",
         "default": false,
         "description": "Publish full text in raw/sources/collected after the nashsu watcher exclusion is applied."
+      },
+      "canonicalLibrary": {
+        "type": "boolean",
+        "default": false,
+        "description": "Use canonical nashsu library, durable tasks and native API verification."
       }
     },
     "allOf": [
