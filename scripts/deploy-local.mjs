@@ -31,5 +31,7 @@ const temporary=configPath+'.wiki.tmp';await writeFile(temporary,JSON.stringify(
 if((await readFile(configPath,'utf8'))!==originalConfig)throw Error('Configuration changed during staging');
 await rename(temporary,configPath);
 await writeFile(join(state,'deployment.json'),JSON.stringify({version:packageInfo.version,release,backup,deployedAt:new Date().toISOString()},null,2),{mode:0o600});
-execFileSync('launchctl',['kickstart','-k',`gui/${process.getuid()}/ai.openclaw.gateway`],{stdio:'inherit'});
+try{execFileSync('launchctl',['print',`gui/${process.getuid()}/ai.openclaw.gateway`],{stdio:'ignore'});execFileSync('launchctl',['kickstart','-k',`gui/${process.getuid()}/ai.openclaw.gateway`],{stdio:'inherit'});}catch(error){
+ execFileSync('launchctl',['bootstrap',`gui/${process.getuid()}`,join(home,'Library/LaunchAgents/ai.openclaw.gateway.plist')],{stdio:'inherit'});
+}
 console.log(JSON.stringify({version:packageInfo.version,release,backup,restartRequested:true}));
