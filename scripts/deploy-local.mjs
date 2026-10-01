@@ -12,7 +12,7 @@ const project=Object.entries(nashsuState.projectRegistry??{}).find(([,p])=>p.pat
 if(!project||nashsuState.sourceWatchConfig?.[project]?.autoIngest!==false)throw Error('Disable duplicate automatic ingestion before deploying canonical library');
 for(const name of await readdir(join(state,'tasks')).catch(e=>{if(e.code==='ENOENT')return [];throw e;})){if(!name.endsWith('.json'))continue;const j=JSON.parse(await readFile(join(state,'tasks',name),'utf8'));if(['queued','retry','processing','cleanup_pending','delivery_pending'].includes(j.status))throw Error('Wait for active Wiki jobs before deploying');}
 const codex='/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';await access(codex);
-execFileSync(entry.config.python,['-c','import httpx, bs4, markdownify, readability, yt_dlp, imageio_ffmpeg'],{stdio:'ignore'});
+execFileSync(entry.config.python,['-c','import httpx, bs4, markdownify, readability, yt_dlp, imageio_ffmpeg, playwright'],{stdio:'ignore'});
 const release=join(state,'releases',packageInfo.version);
 await mkdir(release,{recursive:false});
 for(const name of ['package.json','openclaw.plugin.json','openclaw','src','scripts','vendor','requirements-capture.txt'])await cp(join(root,name),join(release,name),{recursive:true});
