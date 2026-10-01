@@ -60,6 +60,7 @@ export async function collectCanonical(options){
   await saveJSON(join(workspace,'published.json'),pendingPublication);await verifyPublication(pendingPublication,{vault,api});
   return attachRequestBackground(pendingPublication);
  }
+ if(!pendingPublication&&saved?.status==='partial'){await verifyReuse(saved);return attachRequestBackground({...saved,status:'complete',resumableMedia:false,attachmentStatus:'partial'});}
  if(saved){await onStage('verifying');if(pendingPublication)await verifyPublication(saved,{vault,api});else await verifyReuse(saved);return attachRequestBackground(saved);}
  // Memoize successful expensive calls before continuing to the next stage.
  const memo=(name,fn)=>async(input,...rest)=>{

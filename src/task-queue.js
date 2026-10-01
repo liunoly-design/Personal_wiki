@@ -30,7 +30,7 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
   if(!valid(task.id))throw Error('Invalid task ID');
   if(await status(task.id))return{duplicate:true,jobId:task.id};
   const linked=await optionalJSON(join(stateDir,'sources',urlKey(canonicalURL(task.url))+'.json'));
-  if(!task.refresh&&linked?.jobId){const owner=await status(linked.jobId);if(owner?.status?.startsWith('waiting_')&&owner.sender===task.sender&&owner.chat===task.chat)return{duplicate:true,jobId:owner.id};}
+  if(!task.refresh&&!task.background&&linked?.jobId){const owner=await status(linked.jobId);if(owner?.status?.startsWith('waiting_')&&owner.sender===task.sender&&owner.chat===task.chat)return{duplicate:true,jobId:owner.id};}
   const job={...task,url:canonicalURL(task.url),status:'queued',stage:'accepted',createdAt:task.createdAt??new Date(now()).toISOString(),attempts:0};
   await saveJSON(join(work,job.id,'task.json'),job);await saveJSON(join(active,job.id+'.json'),job);
   if(running)void schedule();

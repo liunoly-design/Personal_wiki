@@ -1,14 +1,16 @@
-import {join,isAbsolute} from 'node:path';
+import {join,isAbsolute,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 import {openTaskQueue} from '../src/task-queue.js';
 import {collectCanonical} from '../src/canonical-library.js';
 import {parseCommand} from '../src/wk.js';
 import {createFlash} from '../src/flash.js';
 import {createFeishuClient} from '../src/feishu-http.js';
+const shellQuote=value=>"'"+value.replaceAll("'", "'\"'\"'")+"'";
+function loginCommand(job,config){const profile=join(config.stateDir,'browser',createHash('sha256').update(job.sender+':'+job.chat).digest('hex').slice(0,16),new URL(job.url).hostname);return [config.python,resolve(import.meta.dirname,'../scripts/browser_session.py'),'--login','--url',job.url,'--profile',profile].map(shellQuote).join(' ');}
 function waitingText(job,config){
  const assets=job.result?.missingAssets??[];
  const lines=assets.map(a=>`${a.id} ${a.kind}: ${a.status} ${a.error??''}\n`+(a.status==='waiting_confirmation'?`小婕 wk 确认视频：${job.id} ${a.id} ${a.fingerprint}`:`小婕 wk 补附件：${job.id} ${a.id}`));
- return `【Wiki】${job.result?.source?'部分完成，正文已核验：'+job.result.source:'本项尚未完成：'+job.url}\n任务：${job.id}\n状态：${job.status}\n${job.status==='waiting_login'?'请在本机专用Wiki浏览器中完成该平台登录/验证码（见0.4.2验收文档），然后发送：小婕 wk 登录继续：'+job.id:lines.length?lines.join('\n'):'外部条件恢复后发送：小婕 wk 继续：'+job.id}\n已取得资料、成功附件和进度保留。状态：小婕 wk 状态：${job.id}`;
+ return `【Wiki】${job.result?.source?'部分完成，正文已核验：'+job.result.source:'本项尚未完成：'+job.url}\n任务：${job.id}\n状态：${job.status}\n${job.status==='waiting_login'?'请在本机专用Wiki浏览器中完成该平台登录/验证码（见0.4.2验收文档），然后发送：小婕 wk 登录继续：'+job.id:lines.length?lines.join('\n'):'外部条件恢复后发送：小婕 wk 继续：'+job.id}\n${job.status==='waiting_login'?'本机终端打开专用登录窗口：\n'+loginCommand(job,config):''}\n已取得资料、成功附件和进度保留。状态：小婕 wk 状态：${job.id}`;
 }
 export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFeishu,flash:injectedFlash,collect=collectCanonical}){
  for(const key of ['vault','stateDir','python'])if(!isAbsolute(config[key]??''))throw Error('Absolute paths required');
@@ -66,7 +68,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
  return{
   async accept(scope,url,signal){return this.acceptMessage({...scope},scope.MessageSidFull??scope.MessageSid,signal,url);},
   acceptMessage(...args){const next=controlIngress.then(()=>acceptMessage.apply(this,args));controlIngress=next.catch(()=>{});return next;},
-  async status(scope,id){check(scope);const job=await queue.status(id);if(!job||job.sender!==scope.SenderId||job.chat!==scope.NativeChannelId)throw Error('Job not found');return{jobId:id,url:job.url,controlMessageIds:job.controlMessages??[],mediaApprovals:job.mediaApprovals??{},status:job.status,stage:job.stage,createdAt:job.createdAt,result:job.result??null,reason:job.failure??null,nextAttemptAt:job.nextAttemptAt??null,receiptConfirmed:Boolean(job.receiptId)};},
+  async status(scope,id){check(scope);const job=await queue.status(id);if(!job||job.sender!==scope.SenderId||job.chat!==scope.NativeChannelId)throw Error('Job not found');return{jobId:id,url:job.url,...(job.status==='waiting_login'?{loginCommand:loginCommand(job,config)}:{}),controlMessageIds:job.controlMessages??[],mediaApprovals:job.mediaApprovals??{},status:job.status,stage:job.stage,createdAt:job.createdAt,result:job.result??null,reason:job.failure??null,nextAttemptAt:job.nextAttemptAt??null,receiptConfirmed:Boolean(job.receiptId)};},
   async retryTranslation(scope,id){const job=await this.status(scope,id);if(['waiting_login','waiting_confirmation','waiting_media'].includes(job.status))throw Error('Use the explicit recovery command');await queue.retry(id);return{jobId:id,status:'queued'};},
   start:queue.start,processJobs:queue.drain,
   async close(){await queue.close();await flash.close?.();}

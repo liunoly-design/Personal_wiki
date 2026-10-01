@@ -32,3 +32,16 @@ class XContextTest(unittest.TestCase):
   def request(url,hosts,limit,dest):dest.write_text(html)
   with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request),patch('scripts.capture_article.extract_public',return_value={'duration':1900,'formats':[dict(url='https://video.twimg.com/long.mp4',ext='mp4',width=1920,height=1080,vcodec='h264')]}):
    result=capture('https://x.com/a/status/1',temp);self.assertIn('后续帖',(Path(result['directory'])/'article.md').read_text())
+
+ def test_interrupted_manifest_replace_preserves_checkpoint_and_cached_html(self):
+  html='<article data-reply-to=""><a href="/a/status/1">post</a><p>持久正文</p></article>'
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=lambda url,hosts,limit,dest:dest.write_text(html)) as network:
+   result=capture('https://x.com/a/status/1',temp);manifest=Path(result['directory'])/'manifest.json';old=manifest.read_bytes();(Path(temp)/'capture-result.json').unlink()
+   original=Path.replace
+   def interrupted(path,target):
+    if Path(target)==manifest:raise OSError('synthetic interruption before rename')
+    return original(path,target)
+   with patch.object(Path,'replace',interrupted):
+    with self.assertRaises(OSError):capture('https://x.com/a/status/1',temp)
+   self.assertEqual(manifest.read_bytes(),old)
+   recovered=capture('https://x.com/a/status/1',temp);self.assertEqual(recovered['status'],'complete');self.assertEqual(network.call_count,1)

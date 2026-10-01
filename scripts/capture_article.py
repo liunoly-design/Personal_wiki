@@ -14,8 +14,10 @@ from bs4 import BeautifulSoup
 from markdownify import markdownify
 try:
     from .media_download import extract_public, video_assets, direct_video_asset
+    from .attachment_resume import atomic_json
 except ImportError:
     from media_download import extract_public, video_assets, direct_video_asset
+    from attachment_resume import atomic_json
 
 
 def request(url, hosts, limit, dest):
@@ -100,7 +102,7 @@ def capture(url, output, browser_profile=None):
             from .attachment_resume import resume_assets
         except ImportError:
             from attachment_resume import resume_assets
-        (directory/'manifest.json').write_text(json.dumps(dict(source_url=url,assets=assets)))
+        atomic_json((directory/'manifest.json'),dict(source_url=url,assets=assets))
         result=resume_assets(directory,initial=True);(directory/'article.md').write_text(markdownify(str(body),heading_style='ATX'))
     elif host=='mp.weixin.qq.com':
         config=out/'wechat.toml';config.write_text('[platforms.wechat]\nbrowser = "http"\n[fetch]\nbrowser_attempts = 1\n[output]\nsave_debug_html = "always"\noverwrite = false\n')
@@ -134,7 +136,7 @@ def capture(url, output, browser_profile=None):
             assets.append(identify(dict(kind='video',url=url,path='videos/pending.mp4',status='waiting_metadata',error='WeChat video metadata unavailable'),url))
         # Deduplicate cover/body references by path, keeping the image mapping.
         assets=list({a['path']:a for a in assets}.values())
-        (directory/'manifest.json').write_text(json.dumps(dict(source_url=url,assets=assets),ensure_ascii=False,indent=2))
+        atomic_json((directory/'manifest.json'),dict(source_url=url,assets=assets))
         result={'directory':str(directory.resolve()),'status':'partial' if missing or video_pending else 'complete','resumableMedia':True,'missingAssets':[a for a in assets if a['status']!='downloaded'],'video_status':'waiting_for_supported_download' if video_pending else 'not_detected'}
     elif host in ['x.com','twitter.com']:
         directory=out/'package';directory.mkdir(exist_ok=True)
@@ -145,11 +147,11 @@ def capture(url, output, browser_profile=None):
             soup=BeautifulSoup(raw.read_text(),'html.parser')
             if soup.select('input[type="password"], #captcha, [data-testid="LoginForm"]'):raise ValueError('login/captcha required')
             article=select_target_article(soup,url);html_available=True
-            (directory/'raw-valid.json').write_text(json.dumps({'url':url}))
+            atomic_json((directory/'raw-valid.json'),{'url':url})
         except (ValueError, OSError, http.client.HTTPException, httpx.HTTPError) as error:
             if any(word in str(error).lower() for word in ('401','403','captcha')):raise
             media_info=json.loads((directory/'extractor.json').read_text()) if (directory/'extractor.json').exists() else extract_public(url)
-            (directory/'extractor.json').write_text(json.dumps(media_info,ensure_ascii=False,indent=2))
+            atomic_json((directory/'extractor.json'),media_info)
             description=media_info.get('description')
             if not description:
                 description=next((e.get('description') for e in media_info.get('entries',[]) if e.get('description')),None)
@@ -160,7 +162,7 @@ def capture(url, output, browser_profile=None):
         if has_video and media_info is None:
             try:
                 media_info=extract_public(url)
-                (directory/'extractor.json').write_text(json.dumps(media_info,ensure_ascii=False,indent=2))
+                atomic_json((directory/'extractor.json'),media_info)
             except (ValueError, OSError, subprocess.TimeoutExpired):
                 pass
         try:
@@ -221,7 +223,7 @@ def capture(url, output, browser_profile=None):
         for a in assets:
             old=next((v for v in prior if v.get('id')==a['id'] and v.get('fingerprint')==a['fingerprint']),None)
             if old:a.update({k:v for k,v in old.items() if k in ('status','attempts','sha256','limitReached','error')})
-        manifest.write_text(json.dumps({'source_url':url,'assets':assets,'context':context},ensure_ascii=False,indent=2))
+        atomic_json(manifest,{'source_url':url,'assets':assets,'context':context})
         # Use the same bounded downloader for first capture and subsequent recovery.
         media=resume_assets(directory,initial=True)
         assets=media['assets']
@@ -234,7 +236,7 @@ def capture(url, output, browser_profile=None):
         for a in assets:
             if a['status']!='downloaded':body=body.replace(']('+a['path']+')',']('+a.get('url',url)+')')
         (directory/'article.md').write_text('---\nsource_url: '+json.dumps(url)+'\n---\n\n'+body)
-        (directory/'manifest.json').write_text(json.dumps({'source_url':url,'assets':assets,'context':context},ensure_ascii=False,indent=2))
+        atomic_json((directory/'manifest.json'),{'source_url':url,'assets':assets,'context':context})
         result={'directory':str(directory.resolve()),'status':'complete' if all(a['status']=='downloaded' for a in assets) else 'partial','resumableMedia':True,'contextStatus':'partial' if context['gaps'] else 'complete','contextGaps':context['gaps'],'missingAssets':[a for a in assets if a['status']!='downloaded']}
     else:
         try:
@@ -242,7 +244,7 @@ def capture(url, output, browser_profile=None):
         except ImportError:
             from blog_capture import capture_blog
         result=capture_blog(url,out)
-    receipt.write_text(json.dumps(result));return result
+    atomic_json(receipt,result);return result
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--output',required=True);p.add_argument('--browser-profile');a=p.parse_args()

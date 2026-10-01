@@ -22,6 +22,9 @@ def atomic_json(path,value):
     with temporary.open('w') as f:
         json.dump(value,f,ensure_ascii=False,indent=2);f.flush();os.fsync(f.fileno())
     temporary.replace(path)
+    directory=os.open(path.parent,os.O_RDONLY)
+    try:os.fsync(directory)
+    finally:os.close(directory)
 
 
 def identify(asset,source):
