@@ -27,7 +27,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
     if(job.status!=='delivery_pending'){
      job.status='processing';await save(file,job);
      try{
-      const deps=makeAdapters({vault:config.vault,python:config.python,captureDirectory:join(config.stateDir,'captures',job.id),flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel,reading:true});
+      const deps=makeAdapters({vault:config.vault,python:config.python,captureDirectory:join(config.stateDir,'captures',job.id),flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel,reading:true,publishSources:config.publishSources===true});
       const result=await recordArticle({url:job.url,vault:config.vault,signal:controller.signal,onStage:async(stage,details)=>{job.stage=stage;job.details={...job.details,...details};await save(file,job);}},deps);
       job.result=result;job.receipt=`【Wiki】${result.status==='existing'?'已存在归档':result.status==='pending'?'已归档，分析尚未完成，请检查本机队列':'记录与分析完成'}\n标题：${result.title??'见来源卡'}\n摘要：${result.summary??'见来源卡'}\n基础名词：${result.terms} 个（新建 ${result.newDefinitions} 个）\n来源卡：${result.source}\n附件：${result.attachmentStatus==='complete'?'已保存':result.attachmentStatus==='previous_archive'?'沿用已有归档':'部分完成，存在失败或待处理附件'}\n中文阅读：${result.reading?.status==='complete'?result.reading.path:result.reading?'尚未完成，可单独补译':'沿用旧归档，本次不补译'}\n待审编号：${result.reviews?.map(r=>r.id).join('、')||'无新增待审'}\n基础解释由 Flash 生成，文章关联复用 nashsu 编译逻辑。`;
      }catch(error){
@@ -85,7 +85,7 @@ export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeA
   async retryTranslation(scope,id,signal){
    const current=await this.status(scope,id);
    if(!['done','failed','delivery_pending'].includes(current.status)||!current.result?.sourceId||!current.result?.reading)throw Error('This job has no retryable Chinese reading');
-   const deps=makeAdapters({vault:config.vault,python:config.python,captureDirectory:join(config.stateDir,'captures',id),flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel,reading:true});
+   const deps=makeAdapters({vault:config.vault,python:config.python,captureDirectory:join(config.stateDir,'captures',id),flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel,reading:true,publishSources:config.publishSources===true});
    const reading=await deps.retryReading(current.result.sourceId,signal);
    // Return the durable reading result. Avoid rewriting a job concurrently with
    // the delivery worker; status() obtains this result from the reading store.

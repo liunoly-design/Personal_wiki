@@ -67,6 +67,11 @@
         "type": "string",
         "pattern": "^https?://",
         "description": "Optional proxy for Wiki Flash requests only; no global proxy changes."
+      },
+      "publishSources": {
+        "type": "boolean",
+        "default": false,
+        "description": "Publish full text in raw/sources/collected after the nashsu watcher exclusion is applied."
       }
     },
     "allOf": [

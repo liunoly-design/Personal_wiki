@@ -7,7 +7,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile);
 const root=resolve(import.meta.dirname,'..');
-export function createAdapters({vault,python,captureDirectory,flash,refresh=false,codexBinary,compilerModel,reading=false,translate=codexTranslator(codexBinary),generate=createCodex({binary:codexBinary,model:compilerModel})}){
+export function createAdapters({vault,python,captureDirectory,flash,refresh=false,codexBinary,compilerModel,reading=false,publishSources=false,translate=codexTranslator(codexBinary),generate=createCodex({binary:codexBinary,model:compilerModel})}){
  return {
   ...flash,
   async retryReading(sourceId,signal){
@@ -23,6 +23,7 @@ export function createAdapters({vault,python,captureDirectory,flash,refresh=fals
    const found=index[u.href];if(!found)return null;
    await exec(python,[join(root,'scripts/import_capture.py'),'--vault',vault,'--snapshot',found.archive,'--message','小婕收集 '+u.href],{signal,timeout:60000,maxBuffer:1024*1024});
    if(found.source.startsWith(join(vault,'raw/inputs')+'/')){
+    if(publishSources)await store({operation:'publish-source',vault,sourceId:found.id},{python,signal});
     const directory=join(vault,'.personal-wiki/compilations',found.id);
     try{
      await readFile(join(directory,'generation.json'));
@@ -43,6 +44,7 @@ export function createAdapters({vault,python,captureDirectory,flash,refresh=fals
   async importAndCompile({capture,slug,context,url,signal,onStage=async()=>{}}){
    const normalized=new URL(url);if(['x.com','twitter.com'].includes(normalized.hostname)){normalized.hostname='x.com';normalized.search='';normalized.pathname=normalized.pathname.replace(/\/$/u,'');}normalized.hash='';
    const record=await store({operation:'archive',vault,snapshot:capture.directory,slug,url:normalized.href,refresh},{python,signal});
+   if(publishSources)await store({operation:'publish-source',vault,sourceId:record.id},{python,signal});
    await onStage('archived',{sourceId:record.id,archive:record.archive});
    const compiled=await compileArchive({vault,record,context,generate,explain:flash.explain,python,signal,onStage});
    await onStage('compiled',{compilation:compiled});

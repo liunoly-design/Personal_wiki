@@ -274,6 +274,33 @@ def commit(root, request):
     return result
 
 
+def publish_source(root, request):
+    # Publish only into a folder excluded from nashsu's automatic compiler.
+    # The desktop setting must be saved/applied before enabling this adapter.
+    state_path = request.get('appStatePath') or str(Path.home() / 'Library/Application Support/com.llmwiki.app/app-state.json')
+    state = json.loads(Path(state_path).read_text())
+    projects = state.get('projectRegistry', {})
+    ids = [key for key, value in projects.items() if isinstance(value, dict) and value.get('path') == str(root.path)]
+    if len(ids) != 1:
+        raise ValueError('Nashsu project registration required for source publication')
+    settings = state.get('sourceWatchConfig', {})
+    config = settings.get(ids[0], settings.get('default', {}))
+    if 'raw/sources/collected/*' not in config.get('excludeGlobs', []):
+        raise ValueError('Nashsu source-watch exclusion missing for raw/sources/collected/*')
+    if not re.fullmatch('[a-f0-9]{20}', request['sourceId']):
+        raise ValueError('Invalid source ID')
+    record = json.loads(root.read(f".personal-wiki/{request['sourceId']}.json"))
+    verify(root, record)
+    if not re.fullmatch('[a-z][a-z0-9-]*', record['name']):
+        raise ValueError('Invalid source name')
+    path = f"raw/sources/collected/{record['name']}.md"
+    original = root.read(f"raw/assets/{record['id']}/article.md").decode()
+    body = rewrite_attachments(original, record, '../../..')
+    body = body.rstrip() + f"\n\n---\n\n[原始网页]({record['url']}) · [归档原件](../../assets/{record['id']}/article.md)\n"
+    root.immutable(path, body.encode())
+    return dict(path=str(root.path / path), sourceId=record['id'])
+
+
 def publish_reading(root, request):
     record = json.loads(root.read(f".personal-wiki/{request['sourceId']}.json"))
     verify(root, record)
@@ -364,7 +391,9 @@ if __name__ == '__main__':
     lock = root.lock()
     try:
         operation = request['operation']
-        if operation == 'refresh-terms':
+        if operation == 'publish-source':
+            result = publish_source(root, request)
+        elif operation == 'refresh-terms':
             result = refresh_terms(root, request)
         elif operation == 'archive':
             result = archive(root, request)
