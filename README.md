@@ -1,6 +1,8 @@
 # 个人 Wiki / Personal Wiki
 
-本机已部署 Personal Wiki **0.5.2**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
+2026-10-03：**0.6.0 已本机部署**，支持多轮讨论、明确保存结论、综合草稿待审与批准后阅读。Node91/Python42及双轴复审通过，真实飞书用户入站仍需验收。见[使用与测试手册](docs/v0.6-usage.md)与[验收](docs/research/v0.6-acceptance-2026-10-03.md)。
+
+本机已部署 Personal Wiki **0.6.0**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
 
 - `raw/sources/`：原始文章；`raw/assets/`：图片、视频等原始附件。
 - `wiki/sources/`：来源卡与完整中文阅读正文；`wiki/concepts/`、`wiki/entities/`：概念与实体。
@@ -18,7 +20,7 @@
 
 可用入口和验收范围见[当前用例清单](docs/current-capabilities.md)。
 
-共享 OpenClaw 已建立独立 `wiki` 运行 Agent，由飞书入口“小婕”调度；本项目插件已接入公开博客、X/微信、多链接及文本收集流程，查询和待审处理已接入，讨论仍为预留入口。运行架构见上级 `OpenClaw/README.md`，当前接入范围见[飞书入口说明](docs/openclaw-wiki.md)。
+共享 OpenClaw 已建立独立 `wiki` 运行 Agent，由飞书入口“小婕”调度；本项目插件已接入公开博客、X/微信、多链接及文本收集流程，查询和待审处理已接入，讨论已接入0.6。运行架构见上级 `OpenClaw/README.md`，当前接入范围见[飞书入口说明](docs/openclaw-wiki.md)。
 
 - [需求文档](需求文档.md)：范围、已确认需求与验收目标。
 - [架构与数据](架构与数据.md)：归档、知识层、Schema 与目录草案。
@@ -40,6 +42,6 @@
 
 ## 飞书 Wiki 插件
 
-已安装收集插件到本机 OpenClaw，支持 `小婕收集：内容`、`小婕重新收集：链接`，兼容 `小婕 wk 记录：链接`；Agent 完成抓取、全文翻译、文章分析和名词解释，经受保护写入层发布，再用 nashsu API 核验。安装命令、模型费用和当前限制见 [飞书 Wiki 入口](docs/openclaw-wiki.md)。查询及待审处理见0.5，讨论暂时预留。安装与本地检查通过，真实飞书端到端验收仍待用户发送测试消息，见 [安装记录](docs/research/openclaw-install-2026-09-27.md)。
+已安装收集插件到本机 OpenClaw，支持 `小婕收集：内容`、`小婕重新收集：链接`，兼容 `小婕 wk 记录：链接`；Agent 完成抓取、全文翻译、文章分析和名词解释，经受保护写入层发布，再用 nashsu API 核验。安装命令、模型费用和当前限制见 [飞书 Wiki 入口](docs/openclaw-wiki.md)。查询及待审处理见0.5，讨论与综合见0.6。安装与本地检查通过，真实飞书端到端验收仍待用户发送测试消息，见 [安装记录](docs/research/openclaw-install-2026-09-27.md)。
 
 2026-10-01 修复 X 作者名大小写匹配与 Flash 代理连接，微信脚本模板不再被误判为待下载视频。详见[重跑记录](docs/research/retry-2026-10-01.md)。
