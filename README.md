@@ -1,6 +1,6 @@
 # 个人 Wiki / Personal Wiki
 
-本机已部署 Personal Wiki **0.5.1**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
+本机已部署 Personal Wiki **0.5.2**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
 
 - `raw/sources/`：原始文章；`raw/assets/`：图片、视频等原始附件。
 - `wiki/sources/`：来源卡与完整中文阅读正文；`wiki/concepts/`、`wiki/entities/`：概念与实体。
@@ -13,6 +13,8 @@
 0.5 新增带来源行号的知识查询、正文/原文分页阅读及明确待审动作；旧提案缺少可信基线时保守拒绝应用。见[计划](docs/plans/v0.5.md)、[SPEC](docs/specs/v0.5.md)、[验收与飞书步骤](docs/research/v0.5-acceptance-2026-10-02.md)。真实飞书入站仍待用户验收。
 
 0.5.1 修复查询回执：Codex 先筛选相关候选再根据正文回答，默认仅显示答案与实际引用来源，隐藏未读候选清单及图谱内部信息；模型失败或证据不足明确反馈。见[修复规格](docs/specs/v0.5.1-query-receipt.md)与[验收](docs/research/v0.5.1-query-receipt-2026-10-03.md)。
+
+0.5.2 修复飞书分页阅读：隐藏YAML和逐行L前缀，保留Markdown结构、原始行号及续读命令，正确处理网页/站内/库内链接。见[规格](docs/specs/v0.5.2-reading.md)与[验收](docs/research/v0.5.2-reading-2026-10-03.md)。
 
 可用入口和验收范围见[当前用例清单](docs/current-capabilities.md)。
 
