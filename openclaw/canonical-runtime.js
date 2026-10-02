@@ -8,6 +8,7 @@ import {createFlash} from '../src/flash.js';
 import {openKnowledgeQuery} from '../src/knowledge-query.js';
 import {openReviewService,createReviewStore} from '../src/review-service.js';
 import {localNashsuAPI} from '../src/nashsu-api.js';
+import {openDiscussion} from '../src/discussion.js';
 import {createCodex} from '../src/codex.js';
 import {createFeishuClient} from '../src/feishu-http.js';
 const shellQuote=value=>"'"+value.replaceAll("'", "'\"'\"'")+"'";
@@ -25,8 +26,11 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
  const flash=injectedFlash??createFlash({proxyUrl:config.flashProxyUrl,model:config.flashModel??'gemini-flash-latest',maxAttempts:1,usagePath:join(config.stateDir,'flash-usage.jsonl')});
  const api=nashsu??(signal=>localNashsuAPI(config.vault,{signal,maxAttempts:1}));
  const notes=async scope=>{const found=[];for(const dir of ['tasks','completed'])for(const name of await readdir(join(config.stateDir,dir))){if(!/^[a-f0-9]{64}\.json$/.test(name))continue;const j=JSON.parse(await readFile(join(config.stateDir,dir,name),'utf8'));if(j.sender!==scope.SenderId||j.chat!==scope.NativeChannelId||!j.result?.userRecord)continue;const path=relative(config.vault,j.result.userRecord);const source=relative(config.vault,j.result.source);if(/^wiki\/queries\/user-note-[a-f0-9]{64}\.md$/.test(path))found.push({path,source});}return found;};
- const knowledge=await openKnowledgeQuery({stateDir:config.stateDir,api,notes,generate:queryGenerate??createCodex({binary:config.codexBinary,model:config.compilerModel,textOnly:true,timeoutMs:120000})});
- const reviews=await openReviewService({stateDir:config.stateDir,api,notes,store:store??createReviewStore(config)});
+ const generate=queryGenerate??createCodex({binary:config.codexBinary,model:config.compilerModel,textOnly:true,timeoutMs:120000});
+ const knowledge=await openKnowledgeQuery({stateDir:config.stateDir,api,notes,generate});
+ const publicationStore=store??createReviewStore(config);
+ const reviews=await openReviewService({stateDir:config.stateDir,api,notes,knowledge,store:publicationStore});
+ const discussions=await openDiscussion({stateDir:config.stateDir,python:config.python,knowledge,generate,api,reviews,store:publicationStore});
  const allowed=job=>config.allowedSenderIds.includes(job.sender)&&config.allowedConversationIds.includes(job.chat);
  function check(scope){if(scope.Provider!=='feishu'||scope.AccountId!==config.accountId||!allowed({sender:scope.SenderId,chat:scope.NativeChannelId}))throw Error('Wiki scope denied');}
  const queue=await openTaskQueue({stateDir:config.stateDir,python:config.python,allowed,
@@ -46,6 +50,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
    if(source.message_id!==id||source.chat_id!==scope.NativeChannelId||source.sender?.id!==scope.SenderId||source.sender.id_type!=='open_id'||source.sender.sender_type!=='user'||source.deleted)throw Error('Source mismatch');
    const parsed=parseCommand(JSON.parse(source.body.content).text);
    if(expectedActions&&!expectedActions.includes(parsed?.action))throw Error('Source command mismatch');
+   if(parsed?.action==='discuss')return discussions.execute(scope,parsed,id,signal);
    if(parsed?.action==='query')return knowledge.query(scope,parsed,signal);
    if(parsed?.action==='read')return knowledge.read(scope,parsed.id,parsed.start,signal);
    if(parsed?.action==='review'){if(parsed.mode==='list')return reviews.list(scope,parsed.start,signal);if(parsed.mode==='detail')return reviews.detail(scope,parsed.id,signal);const created=Number(source.create_time);if(!Number.isSafeInteger(created)||created<1)throw Error('Cannot verify approval timestamp; send a new command');return reviews.action(scope,parsed.id,parsed.mode,id,signal,created);}
@@ -82,7 +87,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
  return{
   async accept(scope,url,signal){return this.acceptMessage({...scope},scope.MessageSidFull??scope.MessageSid,signal,url);},
   acceptMessage(...args){const next=controlIngress.then(()=>acceptMessage.apply(this,args));controlIngress=next.catch(()=>{});return next;},
-  knowledgeMessage(scope,id,kind,signal){const actions={query:['query'],read:['read'],review:['review']}[kind];if(!actions)throw Error('Unknown knowledge tool');return this.acceptMessage(scope,id,signal,undefined,actions);},
+  knowledgeMessage(scope,id,kind,signal){const actions={discuss:['discuss'],query:['query'],read:['read'],review:['review']}[kind];if(!actions)throw Error('Unknown knowledge tool');return this.acceptMessage(scope,id,signal,undefined,actions);},
   async status(scope,id){check(scope);const job=await queue.status(id);if(!job||job.sender!==scope.SenderId||job.chat!==scope.NativeChannelId)throw Error('Job not found');return{jobId:id,url:job.url,...(job.status==='waiting_login'?{loginCommand:loginCommand(job,config)}:{}),controlMessageIds:job.controlMessages??[],mediaApprovals:job.mediaApprovals??{},status:job.status,stage:job.stage,createdAt:job.createdAt,result:job.result??null,reason:job.failure??null,nextAttemptAt:job.nextAttemptAt??null,receiptConfirmed:Boolean(job.receiptId)};},
   async retryTranslation(scope,id){const job=await this.status(scope,id);if(['waiting_login','waiting_confirmation','waiting_media'].includes(job.status))throw Error('Use the explicit recovery command');await queue.retry(id);return{jobId:id,status:'queued'};},
   start:queue.start,processJobs:queue.drain,

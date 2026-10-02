@@ -5,11 +5,11 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {parseCommand,recordArticle} from '../src/wk.js';
 
-test('record and query execute; discussion remains reserved',()=>{
+test('record, query and discussion execute',()=>{
  assert.equal(parseCommand('hello'),null);
  assert.deepEqual(parseCommand('小婕 wk 记录：https://x.com/a/status/123'),{action:'record',url:'https://x.com/a/status/123'});
  assert.equal(parseCommand('小婕 wk 查询：Canvas').action,'query');
- assert.equal(parseCommand('小婕 wk 讨论：视频制作').action,'reserved');
+ assert.equal(parseCommand('小婕 wk 讨论：视频制作').action,'discuss');
  assert.equal(parseCommand('小婕 wk 记录：https://x.com/a/status/1 https://x.com/a/status/2').items.length,2);
 });
 test('basic Flash explanations are saved before article compilation; basics do not receive article body',async()=>{

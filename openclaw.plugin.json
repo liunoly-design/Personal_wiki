@@ -1,7 +1,7 @@
 {
   "id": "personal-wiki",
   "name": "Personal Wiki",
-  "description": "Scoped Feishu collection, evidence query and explicit protected Review actions.",
+  "description": "Scoped Feishu collection, evidence query, discussion, conclusion and protected synthesis Review.",
   "activation": {
     "onStartup": true
   },
@@ -113,7 +113,8 @@
       "wiki_resume",
       "wiki_query",
       "wiki_read",
-      "wiki_review"
+      "wiki_review",
+      "wiki_discuss"
     ]
   }
 }

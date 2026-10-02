@@ -3,6 +3,25 @@ import {join} from 'node:path';
 
 export function parseCommand(text) {
  if(typeof text!=='string')return null;
+ const discussion=text.match(/^小婕\s*wk\s+(讨论|新讨论|结束讨论|保存结论|综合)\s*[：:]\s*([\s\S]*)$/u);
+ if(discussion){
+  const [,command,body]=discussion;if(body.length>3000)return {action:'invalid'};
+  if(['结束讨论','保存结论','综合'].includes(command)){
+   const m=body.match(/^(D-[a-f0-9]{16})(?:[ \t]+([^\n]{1,120}))?\s*$/u);
+   return m&&(command==='综合'||!m[2])?{action:'discuss',mode:{结束讨论:'end',保存结论:'save',综合:'synthesis'}[command],id:m[1],title:m[2]??''}:{action:'invalid'};
+  }
+  let id;let remainder=body.trim();const m=remainder.match(/^(D-[a-f0-9]{16})\s+([\s\S]+)$/u);if(m){id=m[1];remainder=m[2];}
+  if(command==='新讨论'&&id)return {action:'invalid'};
+  const questions=[];let judgment='',sources=[];
+  for(const line of remainder.split('\n')){
+   if(/^用户判断[：:]/u.test(line)){judgment+=(judgment?'\n':'')+line.replace(/^用户判断[：:]\s*/u,'');}
+   else if(/^来源[：:]/u.test(line)){
+    for(const v of line.replace(/^来源[：:]\s*/u,'').split(/[,，]/u)){const r=v.trim().match(/^(K-[a-f0-9]{16})(?:\s+([1-9][0-9]{0,6}))?$/u);if(!r)return {action:'invalid'};sources.push({id:r[1],start:Number(r[2]??1)});}
+   }else questions.push(line);
+  }
+  const question=questions.join('\n').trim();return question&&question.length<=2000&&judgment.length<=1000&&sources.length<=5?{action:'discuss',mode:command==='新讨论'?'new':'turn',question,id,sources,judgment}:{action:'invalid'};
+ }
+ if(/^小婕\s*wk\s+(讨论|新讨论|结束讨论|保存结论|综合)/u.test(text))return {action:'invalid'};
  const knowledge=text.match(/^小婕\s*wk\s+(查询|阅读|待审|应用|跳过|稍后)\s*[：:]\s*([\s\S]*)$/u);
  if(knowledge){
   const [,mode,body]=knowledge;

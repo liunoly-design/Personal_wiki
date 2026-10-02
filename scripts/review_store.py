@@ -115,6 +115,43 @@ def finalize(root, request):
     return dict(status='applied', path=intent['path'], hash=intent['outputHash'])
 
 
+
+def publish_discussion(root, request):
+    key = request.get('key', '')
+    if not re.fullmatch('[a-f0-9]{64}', key):
+        raise ValueError('Invalid discussion publication key')
+    content = request.get('content')
+    if not isinstance(content, str) or not content.strip() or len(content.encode()) > 100000:
+        raise ValueError('Invalid discussion content')
+    if request['operation'] == 'conclusion':
+        path = f'wiki/topics/discussion-{key[:16]}.md'
+        root.immutable(path, content.encode())
+        return dict(path=path, hash=sha(content.encode()))
+    scope = request.get('scope')
+    if not isinstance(scope, str) or not re.fullmatch('[a-f0-9]{64}', scope):
+        raise ValueError('Invalid discussion scope')
+    path = f'wiki/synthesis/synthesis-{key[:16]}.md'
+    rid = key[:16]
+    metadata_path = f'.personal-wiki/review-proposals/{rid}.json'
+    previous = root.optional(metadata_path)
+    if previous:
+        data = json.loads(previous)
+        if data['candidate'] != content or data.get('ownerScope') != scope:
+            raise ValueError('Existing synthesis differs')
+    else:
+        current = root.optional(path)
+        body = f'# 综合草稿 {rid}（待审，尚未发布）\n\n目标：{path}\n\n' + content
+        data = dict(id=rid, path=path, candidate=content, sourceId=key[:20],
+                    sourceUrl='讨论依据见文章引用清单', ownerScope=scope,
+                    previousHash=sha(current) if current is not None else None,
+                    proposalHash=sha(body.encode()))
+        # Persist intent before visible proposal; same request repairs interrupted publication.
+        root.immutable(metadata_path, encode(data))
+    body = f'# 综合草稿 {rid}（待审，尚未发布）\n\n目标：{path}\n\n' + content
+    root.immutable(f'wiki/queries/review-{rid}.md', body.encode())
+    return dict(id=rid, path=path)
+
+
 if __name__ == '__main__':
     request = json.load(sys.stdin)
     root = Root(request['vault'])
@@ -134,6 +171,9 @@ if __name__ == '__main__':
                 intent = json.loads(raw)
                 content = root.optional(intent['path'])
                 result = dict(safeToAbandon=(content is not None and sha(content) != intent['outputHash']) or (content is None and intent['previousHash'] is None))
+        elif operation in ('conclusion', 'synthesis'):
+            lock = root.lock()
+            result = publish_discussion(root, request)
         elif operation in ('apply', 'finalize'):
             lock = root.lock()
             result = apply(root, request) if operation == 'apply' else finalize(root, request)
