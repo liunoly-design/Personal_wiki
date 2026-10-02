@@ -11,7 +11,7 @@ export function readingContext(lines,start){
  const urlLine=(metadataEnd?lines.slice(1,metadataEnd-1):[]).find(l=>/^url:\s*/.test(l));
  const sourceUrl=httpURL(urlLine?.replace(/^url:\s*/,'').replace(/^(["'])(.*)\1$/,'$2'));
  let fenceBefore=null;for(const line of lines.slice(metadataEnd,start-1))fenceBefore=advanceFence(line,fenceBefore);
- const references={};let referenceFence=null;
+ const references=Object.create(null);let referenceFence=null;
  for(const line of lines.slice(metadataEnd)){
   const next=advanceFence(line,referenceFence);
   if(!referenceFence&&!next){const m=line.match(/^ {0,3}\[([^\]]+)\]:\s*<?([^\s>]+)>?/);if(m)references[m[1].toLowerCase().replace(/\s+/g,' ')]=m[2];}
@@ -26,8 +26,9 @@ function inlineLinks(text,sourceUrl,references){
   return url?`${image?'!':''}[${label}](${url})`:image?`${label||'图片'}（归档附件）`:label;
  };
  return text.replace(/(!?)\[([^\]]*)\]\(<?([^\s)>]+)>?\)/g,(_,image,label,target)=>link(image,label,target))
- .replace(/(!?)\[([^\]\n]+)\]\[([^\]\n]*)\]/g,(match,image,label,key)=>{const target=references[(key||label).toLowerCase().replace(/\s+/g,' ')];return target?link(image,label,target):match;})
- .replace(/(!?)\[\[([^\]\n]+)\]\]/g,(_,image,value)=>{const label=value.split('|').at(-1).split('/').at(-1);return image?`${label}（归档附件）`:label;});
+ .replace(/(!?)\[([^\]\n]+)\]\[([^\]\n]*)\]/g,(match,image,label,key)=>{const target=references[(key||label).toLowerCase().replace(/\s+/g,' ')];return typeof target==='string'?link(image,label,target):match;})
+ .replace(/(!?)\[\[([^\]\n]+)\]\]/g,(_,image,value)=>{const label=value.split('|').at(-1).split('/').at(-1);return image?`${label}（归档附件）`:label;})
+ .replace(/(!?)\[([^\]\n]+)\](?![\[(])/g,(match,image,label)=>{const target=references[label.toLowerCase().replace(/\s+/g,' ')];return typeof target==='string'?link(image,label,target):match;});
 }
 export function renderReading(p,originals=[]){
  let fence=p.fenceBefore;const output=[],plain=[];

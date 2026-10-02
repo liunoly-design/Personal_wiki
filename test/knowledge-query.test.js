@@ -67,3 +67,9 @@ test('reading preserves indented code and renders reference, multiline and Obsid
  try{const q=await openKnowledgeQuery({stateDir:root,api:async()=>({search:async()=>({results:[{path:'wiki/sources/links.md'}]}),read:async()=>text,graph:async()=>({nodes:[],edges:[]})})});const r=await q.query(scope,{question:'links'});const p=await q.read(scope,r.sources[0].id);assert.match(p.text,/\n\n    const x=1;\n    const y=2;/);assert.match(p.text,/private-image.png（归档附件）/);assert.match(p.text,/\[网站\]\(https:\/\/example.com\/\)/);assert.doesNotMatch(p.text,/raw\/assets|\[asset\]|\[web\]|\]\(\/author/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('reading retains shortcut website references and unknown reference names cannot crash rendering',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-reference-'));
+ const text='---\nurl: https://x.com/author/status/1\n---\n# Title\n[官网]\n[普通方括号]\n[正文][constructor]\n\n[官网]: https://example.org/';
+ try{const q=await openKnowledgeQuery({stateDir:root,api:async()=>({search:async()=>({results:[{path:'wiki/sources/refs.md'}]}),read:async()=>text,graph:async()=>({nodes:[],edges:[]})})});const r=await q.query(scope,{question:'refs'});const p=await q.read(scope,r.sources[0].id);assert.match(p.text,/\[官网\]\(https:\/\/example.org\/\)/);assert.match(p.text,/\[普通方括号\]/);assert.match(p.text,/\[正文\]\[constructor\]/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
