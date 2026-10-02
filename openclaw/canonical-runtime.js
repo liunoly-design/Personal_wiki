@@ -48,7 +48,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
    if(expectedActions&&!expectedActions.includes(parsed?.action))throw Error('Source command mismatch');
    if(parsed?.action==='query')return knowledge.query(scope,parsed,signal);
    if(parsed?.action==='read')return knowledge.read(scope,parsed.id,parsed.start,signal);
-   if(parsed?.action==='review'){if(parsed.mode==='list')return reviews.list(scope,parsed.start,signal);if(parsed.mode==='detail')return reviews.detail(scope,parsed.id,signal);return reviews.action(scope,parsed.id,parsed.mode,id,signal);}
+   if(parsed?.action==='review'){if(parsed.mode==='list')return reviews.list(scope,parsed.start,signal);if(parsed.mode==='detail')return reviews.detail(scope,parsed.id,signal);const created=Number(source.create_time);if(!Number.isSafeInteger(created)||created<1)throw Error('Cannot verify approval timestamp; send a new command');return reviews.action(scope,parsed.id,parsed.mode,id,signal,created);}
    if(parsed?.action==='control'){
     const current=await this.status(scope,parsed.jobId);
     if(current.controlMessageIds.includes(id))return{...current,duplicate:true};
