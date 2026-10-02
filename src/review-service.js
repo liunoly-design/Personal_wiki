@@ -36,7 +36,7 @@ export async function openReviewService({stateDir,api,store,notes=async()=>[]}){
   if(['applied','skipped'].includes(saved?.status)){if(saved.mode!==mode)throw Error('Review already finalized');return{text:`【Wiki】${id} ${saved.status}（重复命令，无额外修改）`,status:saved.status};}
   if(saved&&['verification_pending','sync_pending','applying'].includes(saved.status)&&saved.mode!==mode)throw Error('Pending action must be recovered before changing action');
   const client=await api(signal);const latest=await current(item,client);if(!await mayView(scope,latest))throw Error('Review not found');
-  if(latest.fingerprint!==item.fingerprint||(saved?.fingerprint&&saved.status!=='deferred'&&saved.fingerprint!==latest.fingerprint))throw Error('Proposal changed; view it again');
+  if(latest.fingerprint!==item.fingerprint||(saved?.fingerprint&&!['deferred','blocked'].includes(saved.status)&&saved.fingerprint!==latest.fingerprint))throw Error('Proposal changed; view it again');
   if(mode==='应用'&&(latest.kind==='native'||!latest.metadata))throw Error('Missing safe baseline; legacy/native proposal cannot be applied');
   if(latest.kind==='native'&&latest.content.resolved&&!saved)throw Error('Native review already resolved');
   saved={...(saved??{}),mode,fingerprint:item.fingerprint,authorization:{messageId,sender:scope.SenderId,chat:scope.NativeChannelId,at:new Date().toISOString()},status:mode==='稍后'?'deferred':mode==='跳过'?'sync_pending':'applying'};await saveJSON(actionPath(id),saved);
