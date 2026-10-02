@@ -125,3 +125,12 @@ test('common source_id remains one independent source even when only translation
  const d=await f.send('om_new','小婕 wk 新讨论：同一来源');await assert.rejects(f.send('om_s',`小婕 wk 综合：${d.id} 综合`),/两份独立来源/);
  }finally{await f.close();}
 });
+test('failed preconditions can be retried after adding evidence; implicit follow-up never revives a different topic',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.api.read=async p=>f.pages[p]??readFile(join(f.config.vault,p),'utf8');f.api.search=async()=>({results:[]});
+ const d=await f.send('om_empty','小婕 wk 讨论：团队');await assert.rejects(f.send('om_pre',`小婕 wk 保存结论：${d.id}`),/没有已读/);
+ f.api.search=async()=>({results:[...Object.keys(f.pages),...(await readdir(join(f.config.vault,'wiki/topics')).catch(()=>[])).map(n=>'wiki/topics/'+n)].map(path=>({path}))});
+ await f.send('om_evidence','小婕 wk 讨论：补充证据');assert.match((await f.send('om_pre2',f.messages.om_pre)).text,/核验/);
+ f.fail=true;await assert.rejects(f.send('om_failed','小婕 wk 讨论：继续'));f.fail=false;const b=await f.send('om_b','小婕 wk 新讨论：另一话题');assert.equal((await f.send('om_continue','小婕 wk 讨论：继续')).id,b.id);
+ }finally{await f.close();}
+});

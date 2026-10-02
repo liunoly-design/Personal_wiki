@@ -30,7 +30,15 @@ export async function openDiscussion({stateDir,python,knowledge,generate,api,sto
   if(request?.retryOf)request=state.messages[request.retryOf];
   if(request?.result)return request.result;
   if(!request){
-   const prior=Object.entries(state.messages).find(([,r])=>!r.retryOf&&r.fingerprint===fingerprint&&(!r.result&&(['save','synthesis','end'].includes(command.mode)||r.snapshot.turns.length===state.discussions[r.id]?.turns.length)||(['save','synthesis'].includes(command.mode)&&hash(JSON.stringify(r.snapshot.turns))===hash(JSON.stringify(state.discussions[r.id]?.turns)))));
+   const sameRevision=r=>hash(JSON.stringify(r.snapshot.turns))===hash(JSON.stringify(state.discussions[r.id]?.turns));
+   const canResume=r=>{
+    if(['save','synthesis'].includes(command.mode))return Boolean(r.content)||sameRevision(r);
+    if(command.mode==='turn'&&!command.id&&r.id!==state.active)return false;
+    return sameRevision(r);
+   };
+   const prior=Object.entries(state.messages).find(([,r])=>!r.retryOf&&r.fingerprint===fingerprint&&
+    (!r.result?canResume(r):['save','synthesis'].includes(command.mode)&&sameRevision(r)));
+
    if(prior){state.messages[messageId]={fingerprint,retryOf:prior[0]};request=prior[1];await saveJSON(statePath,state);if(request.result)return request.result;}
   }
   if(!request){
