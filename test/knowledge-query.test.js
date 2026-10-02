@@ -61,3 +61,9 @@ test('reading continuation wraps an open code fence and preserves literal links 
  try{const q=await openKnowledgeQuery({stateDir:root,api:async()=>({search:async()=>({results:[{path:'wiki/sources/code.md'}]}),read:async()=>text,graph:async()=>({nodes:[],edges:[]})})});const r=await q.query(scope,{question:'code'});const first=await q.read(scope,r.sources[0].id,1);assert.match(first.text,/````md\n\[代码链接\]\(\/literal\)\nline80\n````/);assert.match(first.text,/继续：小婕 wk 阅读：K-[a-f0-9]{16} 81/);const second=await q.read(scope,r.sources[0].id,81);assert.match(second.text,/````md\n\[下一页代码\]\(\/also-literal\)\n````\n\n- 正常正文/);assert.equal(second.sources[0].start,81);assert.doesNotMatch(second.text,/^L\d+:/m);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('reading preserves indented code and renders reference, multiline and Obsidian attachment links safely',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-links-'));
+ const text='    const x=1;\n    const y=2;\n\n[附件][asset]\n[网站][web]\n![[private-image.png]]\n[统计\nViews](/author/status/1)\n\n[asset]: ../../raw/assets/private/image.png\n[web]: https://example.com/';
+ try{const q=await openKnowledgeQuery({stateDir:root,api:async()=>({search:async()=>({results:[{path:'wiki/sources/links.md'}]}),read:async()=>text,graph:async()=>({nodes:[],edges:[]})})});const r=await q.query(scope,{question:'links'});const p=await q.read(scope,r.sources[0].id);assert.match(p.text,/\n\n    const x=1;\n    const y=2;/);assert.match(p.text,/private-image.png（归档附件）/);assert.match(p.text,/\[网站\]\(https:\/\/example.com\/\)/);assert.doesNotMatch(p.text,/raw\/assets|\[asset\]|\[web\]|\]\(\/author/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
