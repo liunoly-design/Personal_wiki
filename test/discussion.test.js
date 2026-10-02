@@ -106,3 +106,13 @@ test('raw and translated page with common original are one source, independent c
  const d=await f.send('om_d','小婕 wk 讨论：团队');await assert.rejects(f.send('om_s',`小婕 wk 综合：${d.id} 综合`),/两份独立来源/);
  }finally{await f.close();}
 });
+test('new Feishu message with same failed save command recovers original candidate instead of generating a second page',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.api.read=async p=>f.pages[p]??readFile(join(f.config.vault,p),'utf8');
+ f.api.search=async()=>({results:[...Object.keys(f.pages),...(await readdir(join(f.config.vault,'wiki/topics')).catch(()=>[])).map(n=>'wiki/topics/'+n)].map(path=>({path}))});
+ const d=await f.send('om_start','小婕 wk 讨论：团队');const read=f.api.read;f.api.read=async p=>{if(p.startsWith('wiki/topics/'))throw Error('API offline');return read(p);};
+ await assert.rejects(f.send('om_save1',`小婕 wk 保存结论：${d.id}`),/offline/);const calls=f.calls;f.api.read=read;await f.restart();
+ await f.send('om_save2',f.messages.om_save1);assert.equal(f.calls,calls);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
+ await f.send('om_save3',f.messages.om_save1);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
+ }finally{await f.close();}
+});

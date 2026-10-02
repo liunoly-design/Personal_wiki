@@ -17,12 +17,17 @@ export async function openDiscussion({stateDir,python,knowledge,generate,api,sto
   const statePath=join(directory,scopeKey(scope)+'.json');const state=await optionalJSON(statePath)??{active:null,discussions:{},messages:{}};
   const fingerprint=hash(JSON.stringify(command));let request=state.messages[messageId];
   if(request&&request.fingerprint!==fingerprint)throw Error('Discussion source command changed');
+  if(request?.retryOf)request=state.messages[request.retryOf];
   if(request?.result)return request.result;
+  if(!request){
+   const prior=Object.entries(state.messages).find(([,r])=>!r.retryOf&&r.fingerprint===fingerprint&&(!r.result||(['save','synthesis'].includes(command.mode)&&hash(JSON.stringify(r.snapshot.turns))===hash(JSON.stringify(state.discussions[r.id]?.turns)))));
+   if(prior){state.messages[messageId]={fingerprint,retryOf:prior[0]};request=prior[1];await saveJSON(statePath,state);if(request.result)return request.result;}
+  }
   if(!request){
    let id=command.id??(command.mode==='new'?null:state.active);
    if(!id&&['turn','new'].includes(command.mode)){id='D-'+hash(scopeKey(scope)+messageId).slice(0,16);state.discussions[id]={id,topic:command.question,turns:[],pages:[],ended:false};}
    if(!id||!state.discussions[id])throw Error('Discussion not found in this user/conversation');
-   request=state.messages[messageId]={id,fingerprint,status:'pending',snapshot:structuredClone(state.discussions[id])};await saveJSON(statePath,state);
+   request=state.messages[messageId]={id,fingerprint,origin:messageId,status:'pending',snapshot:structuredClone(state.discussions[id])};await saveJSON(statePath,state);
   }
   const live=state.discussions[request.id];
   const d=['save','synthesis'].includes(command.mode)?request.snapshot:live;
@@ -31,7 +36,7 @@ export async function openDiscussion({stateDir,python,knowledge,generate,api,sto
   if(command.mode==='end'){d.ended=true;if(state.active===d.id)state.active=null;return persist({id:d.id,text:`【Wiki】讨论 ${d.id} 已结束，未自动保存。可明确保存结论或新讨论。`});}
   if(['save','synthesis'].includes(command.mode)){
    if(!d.turns.length||!d.pages.some(p=>!p.ownedNote))throw Error('没有已读来源与成功讨论，不能保存或综合');
-   const key=hash(scopeKey(scope)+messageId);
+   const key=hash(scopeKey(scope)+request.origin);
    if(!request.content){
     const basis=d.pages.filter(p=>!p.ownedNote);
     if(command.mode==='synthesis'){
