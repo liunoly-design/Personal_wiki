@@ -1,4 +1,5 @@
 import {join,posix} from 'node:path';import {createHash} from 'node:crypto';
+import {readingContext,renderReading} from './reading-display.js';
 import {saveJSON,optionalJSON} from './durable-files.js';
 export const hash=value=>createHash('sha256').update(value).digest('hex');
 export const scopeKey=scope=>hash(JSON.stringify([scope.SenderId,scope.NativeChannelId]));
@@ -17,7 +18,7 @@ export async function openKnowledgeQuery({stateDir,api,generate,notes=async()=>[
   const selected=[];let size=0;for(const line of lines.slice(start-1,start+79)){if(size+Buffer.byteLength(line)+1>budget)break;selected.push(line);size+=Buffer.byteLength(line)+1;}
   if(!selected.length)throw Error('Line exceeds reading limit');
   const end=start+selected.length-1;
-  return {...item,title:item.title??lines.find(l=>/^#\s+/.test(l))?.replace(/^#\s+/,''),start,end,totalLines:lines.length,partial:start>1||end<lines.length,links:[...new Set(links)],content:selected.join('\n'),citation:`[${item.id} L${start}-L${end}]`};
+  return {...item,...readingContext(lines,start),title:item.title??lines.find(l=>/^#\s+/.test(l))?.replace(/^#\s+/,''),start,end,totalLines:lines.length,partial:start>1||end<lines.length,links:[...new Set(links)],content:selected.join('\n'),citation:`[${item.id} L${start}-L${end}]`};
  }
  function render(p){return `${p.citation} ${p.path}\n类型：${p.kind}；${p.partial?'部分读取':'全文已读取'}；共${p.totalLines}行${p.end<p.totalLines?`${p.end<p.totalLines?`；继续：小婕 wk 阅读：${p.id} ${p.end+1}`:''}${p.start>1?`；从头：小婕 wk 阅读：${p.id} 1`:''}`:''}\n${p.content.split('\n').map((l,i)=>`L${p.start+i}: ${l}`).join('\n')}`;}
  return {
@@ -58,6 +59,6 @@ export async function openKnowledgeQuery({stateDir,api,generate,notes=async()=>[
    const text=insufficient?'【Wiki】实际读取的正文没有足够证据回答这个问题。可以补充具体问题或别名，或自行阅读：\n\n'+readingChoices(pages):answer?`【Wiki】${answer}\n\n来源：\n${sourceText}`:generate?'【Wiki】回答模型暂不可用或引用未通过校验，尚未生成可信答案。可以稍后重试，或自行阅读：\n\n'+readingChoices(pages):'【Wiki】'+evidence;
    return {text,sources:pages,results:selected,edges};
   },
-  async read(scope,id,start=1,signal){if(!/^K-[a-f0-9]{16}$/.test(id??''))throw Error('Evidence not found');const item=(await optionalJSON(registry(scope)))?.[id];if(!item||!(evidencePath(item.path)||(item.ownedNote&&(await notes(scope)).some(n=>n.path===item.path))))throw Error('Evidence not found');const p=await page(await api(signal),item,start);const saved=await optionalJSON(registry(scope));for(const path of p.links){const related={id:idFor(path),path,kind:path.startsWith('raw/')?'归档原文（尚未读取）':'文内关联（尚未读取）'};saved[related.id]=related;}await saveJSON(registry(scope),saved);return{text:'【Wiki】'+render(p)+'\n文内关联（尚未读取）：\n'+p.links.map(path=>`${idFor(path)} ${path}`).join('\n'),sources:[p]};}
+  async read(scope,id,start=1,signal){if(!/^K-[a-f0-9]{16}$/.test(id??''))throw Error('Evidence not found');const item=(await optionalJSON(registry(scope)))?.[id];if(!item||!(evidencePath(item.path)||(item.ownedNote&&(await notes(scope)).some(n=>n.path===item.path))))throw Error('Evidence not found');const p=await page(await api(signal),item,start);const saved=await optionalJSON(registry(scope));for(const path of p.links){const related={id:idFor(path),path,kind:path.startsWith('raw/')?'归档原文（尚未读取）':'文内关联（尚未读取）'};saved[related.id]=related;}await saveJSON(registry(scope),saved);return{text:renderReading(p,p.links.filter(path=>path.startsWith('raw/sources/')).map(idFor)),sources:[p]};}
  };
 }

@@ -48,3 +48,16 @@ test('Codex can report insufficient evidence after reading without being misrepo
  const r=await q.query(scope,{question:'医疗服务收费'});assert.match(r.text,/实际读取的正文没有足够证据/);assert.doesNotMatch(r.text,/模型暂不可用|引用未通过|WIKI_INSUFFICIENT|wiki\//);assert.match(r.text,/小婕 wk 阅读：/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('reading renders Markdown without line prefixes or frontmatter and resolves website links without exposing local paths',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-display-'));
+ const text='---\ntype: source\nurl: "https://x.com/author/status/1"\n---\n# 阅读标题\n\n- 列表\n> 引文\n[作者](/author)\n[网站](https://example.com/)\n[提取稿](../../raw/assets/private/article.md)\n![图片](../../raw/assets/private/image.webp)\n[[concept|概念]]\n[原文](../../raw/sources/sample.md)\n```js\nconst link = "[保留](/code)";\n```';
+ try{const q=await openKnowledgeQuery({stateDir:root,api:async()=>({search:async()=>({results:[{path:'wiki/sources/sample.md'}]}),read:async()=>text,graph:async()=>({nodes:[],edges:[]})})});const r=await q.query(scope,{question:'标题'});const p=await q.read(scope,r.sources[0].id);
+ assert.match(p.text,/# 阅读标题\n\n- 列表\n> 引文/);assert.match(p.text,/\[作者\]\(https:\/\/x.com\/author\)/);assert.match(p.text,/\[网站\]\(https:\/\/example.com\/\)/);assert.match(p.text,/const link = "\[保留\]\(\/code\)";/);assert.match(p.text,/归档附件/);assert.match(p.text,/原文阅读：小婕 wk 阅读：K-/);assert.doesNotMatch(p.text,/^L\d+:|type: source|url:|wiki\/sources|raw\/assets|文内关联|\[\[concept/m);assert.equal(p.sources[0].start,1);assert.equal(p.sources[0].end,17);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('reading continuation wraps an open code fence and preserves literal links and original line positions',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-fence-'));
+ const text='# Code\n'+Array.from({length:76},(_,i)=>`段落${i}`).join('\n')+'\n````md\n[代码链接](/literal)\nline80\n[下一页代码](/also-literal)\n````\n\n- 正常正文';
+ try{const q=await openKnowledgeQuery({stateDir:root,api:async()=>({search:async()=>({results:[{path:'wiki/sources/code.md'}]}),read:async()=>text,graph:async()=>({nodes:[],edges:[]})})});const r=await q.query(scope,{question:'code'});const first=await q.read(scope,r.sources[0].id,1);assert.match(first.text,/````md\n\[代码链接\]\(\/literal\)\nline80\n````/);assert.match(first.text,/继续：小婕 wk 阅读：K-[a-f0-9]{16} 81/);const second=await q.read(scope,r.sources[0].id,81);assert.match(second.text,/````md\n\[下一页代码\]\(\/also-literal\)\n````\n\n- 正常正文/);assert.equal(second.sources[0].start,81);assert.doesNotMatch(second.text,/^L\d+:/m);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
