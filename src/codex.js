@@ -3,13 +3,13 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-export function createCodex({binary='codex',model='gpt-6-sol'}={}){
+export function createCodex({binary='codex',model='gpt-6-sol',textOnly=false,timeoutMs=1800000}={}){
  return async({prompt,signal})=>{
   const directory=await mkdtemp(join(tmpdir(),'wiki-codex-'));
   try{
    const output=join(directory,'response.md');
    await new Promise((accept,reject)=>{
-    const child=spawn(binary,['-a','never','exec','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--sandbox','read-only','--ephemeral','--model',model,'--json','--output-last-message',output,'-'],{cwd:directory,signal,timeout:1800000,stdio:['pipe','pipe','pipe']});
+    const child=spawn(binary,['-a','never','exec','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--sandbox','read-only','--ephemeral',...(textOnly?['-c','web_search="disabled"','-c','mcp_servers={}',...['shell_tool','unified_exec','plugins','apps','browser_use','computer_use','multi_agent','image_generation','view_image','artifact','in_app_browser','skill_search'].flatMap(name=>['--disable',name])]:[]),'--model',model,'--json','--output-last-message',output,'-'],{cwd:directory,signal,timeout:timeoutMs,stdio:['pipe','pipe','pipe']});
     let diagnostic='';
     const collect=data=>{diagnostic=(diagnostic+data.toString()).slice(-16000);};
     child.stdout.on('data',collect);child.stderr.on('data',collect);

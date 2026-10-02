@@ -23,6 +23,9 @@ export async function verifyPublication(result,{vault,api}){
  for(const [path,hash] of Object.entries(result.files)){
   if(digest(await api.read(path))!==hash)throw Error('Nashsu API content mismatch: '+path);
  }
+ for(const [path,hash] of Object.entries(result.metadata??{})){
+  if(!/^\.personal-wiki\/review-proposals\/[a-f0-9]{16}\.json$/.test(path)||digest(await readFile(join(vault,path)))!==hash)throw Error('Proposal metadata integrity mismatch');
+ }
  for(const [path,hash] of Object.entries(result.assets)){
   if(digest(await readFile(join(vault,path)))!==hash)throw Error('Archive integrity mismatch: '+path);
  }

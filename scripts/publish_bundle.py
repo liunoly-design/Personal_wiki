@@ -106,6 +106,8 @@ def publish(request):
                     rid = sha((sid + path).encode())[:16]
                     review = f'wiki/queries/review-{rid}.md'
                     files[review] = f'# 待审修改\n\n目标：[现有页面](../../{path})\n\n已有内容未被覆盖。请比较后决定是否采用下方内容。\n\n{content}'
+                    metadata = dict(id=rid, path=path, previousHash=sha(old) if old is not None else None, candidate=content, sourceId=sid, sourceUrl=record['url'], proposalHash=sha(files[review].encode()))
+                    files[f'.personal-wiki/review-proposals/{rid}.json'] = encode(metadata).decode()
                     reviews.append({'id': rid, 'path': path, 'file': review})
                 else:
                     files[path] = content
@@ -120,7 +122,8 @@ def publish(request):
             target.immutable(path, content.encode())
         return dict(status='complete', sourceId=sid,
                     source=str(target.path / f'wiki/sources/{plan["name"]}.md'), title=record['name'],
-                    files={p: sha(v.encode()) for p, v in plan['files'].items()},
+                    files={p: sha(v.encode()) for p, v in plan['files'].items() if not p.startswith('.personal-wiki/')},
+                    metadata={p: sha(v.encode()) for p, v in plan['files'].items() if p.startswith('.personal-wiki/')},
                     assets={f'raw/assets/{sid}/{p}': h for p, h in plan['assets'].items()}, reviews=plan['reviews'])
     finally:
         os.close(lock)

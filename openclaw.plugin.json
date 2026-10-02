@@ -1,7 +1,7 @@
 {
   "id": "personal-wiki",
   "name": "Personal Wiki",
-  "description": "Record explicit 小婕 wk Feishu links, save Flash foundations, then compile with nashsu.",
+  "description": "Scoped Feishu collection, evidence query and explicit protected Review actions.",
   "activation": {
     "onStartup": true
   },
@@ -110,7 +110,10 @@
       "wiki_record",
       "wiki_status",
       "wiki_retry_translation",
-      "wiki_resume"
+      "wiki_resume",
+      "wiki_query",
+      "wiki_read",
+      "wiki_review"
     ]
   }
 }

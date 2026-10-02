@@ -25,7 +25,7 @@ if(!config.plugins.load.paths.includes(release))throw Error('Wiki installation p
 entry.config={...entry.config,canonicalLibrary:true,publishSources:false,...(process.env.WIKI_FLASH_PROXY_URL?{flashProxyUrl:process.env.WIKI_FLASH_PROXY_URL}:{}),codexBinary:codex,compilerModel:'gpt-6-sol',wikiAgentId:'wiki'};
 // Record deployment separately: plugin schema does not accept arbitrary fields.
 const allow=config.agents?.entries?.wiki?.tools?.allow;
-if(Array.isArray(allow))config.agents.entries.wiki.tools.allow=[...new Set([...allow,'wiki_record','wiki_status','wiki_retry_translation','wiki_resume'])];
+if(Array.isArray(allow))config.agents.entries.wiki.tools.allow=[...new Set([...allow,'wiki_record','wiki_status','wiki_retry_translation','wiki_resume','wiki_query','wiki_read','wiki_review'])];
 const temporary=configPath+'.wiki.tmp';await writeFile(temporary,JSON.stringify(config,null,2)+'\n',{mode:0o600});
 // Refuse to lose settings another process changed during staging.
 if((await readFile(configPath,'utf8'))!==originalConfig)throw Error('Configuration changed during staging');

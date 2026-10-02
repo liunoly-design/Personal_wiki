@@ -3,12 +3,27 @@ import {join} from 'node:path';
 
 export function parseCommand(text) {
  if(typeof text!=='string')return null;
+ const knowledge=text.match(/^小婕\s*wk\s+(查询|阅读|待审|应用|跳过|稍后)\s*[：:]\s*([\s\S]*)$/u);
+ if(knowledge){
+  const [,mode,body]=knowledge;
+  if(mode==='查询'){
+   const lines=body.trim().split('\n');let topic='',aliases=[];const question=[];
+   for(const line of lines){if(/^主题[：:]/u.test(line)){topic=line.replace(/^主题[：:]\s*/u,'').trim();}else if(/^别名[：:]/u.test(line)){aliases=line.replace(/^别名[：:]\s*/u,'').split(/[,，、]/u).map(x=>x.trim()).filter(Boolean);}else question.push(line);}
+   if(!question.join('\n').trim()||body.length>2500||topic.length>100||aliases.length>3||aliases.some(a=>a.length>100))return{action:'invalid'};
+   return {action:'query',question:question.join('\n').trim(),aliases,topic};
+  }
+  if(mode==='阅读'){const m=body.match(/^(K-[a-f0-9]{16})(?:\s+([1-9][0-9]{0,6}))?\s*$/u);return m?{action:'read',id:m[1],start:Number(m[2]??1)}:{action:'invalid'};}
+  if(mode==='待审'){const m=body.match(/^(?:(R-[a-f0-9]{16})|([1-9][0-9]{0,6}))?\s*$/u);return m?(m[1]?{action:'review',mode:'detail',id:m[1]}:{action:'review',mode:'list',start:Number(m[2]??1)}):{action:'invalid'};}
+  const m=body.match(/^(R-[a-f0-9]{16})\s*$/u);return m?{action:'review',mode,id:m[1]}:{action:'invalid'};
+ }
+ if(/^小婕\s*wk\s+(查询|阅读|待审|应用|跳过|稍后)/u.test(text))return{action:'invalid'};
+
  const control=text.match(/^小婕\s*wk\s+(状态|继续|登录继续|补附件|确认视频)\s*[：:]\s*([a-f0-9]{64})(?:\s+([a-f0-9]{16}))?(?:\s+([a-f0-9]{64}))?\s*$/u);
  if(control){const [,mode,jobId,assetId,fingerprint]=control;if((['补附件','确认视频'].includes(mode)!==Boolean(assetId))||(mode==='确认视频')!==Boolean(fingerprint))return{action:'invalid'};return{action:'control',mode,jobId,assetId,fingerprint};}
  if(/^小婕\s*wk\s+(状态|继续|登录继续|补附件|确认视频)/u.test(text))return{action:'invalid'};
  const match=text.match(/^小婕[ \t]*(?:(?:wk[ \t]+(记录|查询|讨论))|(重新收集|收集))([ \t]*[：:]|[ \t]|(?=\n|https?:\/\/|$))([\s\S]*)$/iu);
  if(!match)return /^小婕\s+wk(?:\s|[：:])/iu.test(text)?{action:'invalid'}:null;
- if(['查询','讨论'].includes(match[1]))return {action:'reserved',mode:match[1]};
+ if(match[1]==='讨论')return {action:'reserved',mode:match[1]};
  let body=match[4],refresh=match[2]==='重新收集';
  if(/^重新收集\s*[：:]?/u.test(body)){refresh=true;body=body.replace(/^重新收集\s*[：:]?\s*/u,'');}
  const split=body.match(/(?:^|\n)\s*(?:备注|背景|个人备注|个人背景)\s*[：:]([\s\S]*)$/u);

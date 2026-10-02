@@ -1,0 +1,19 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import {openReviewService} from '../src/review-service.js';
+const scope={SenderId:'u',NativeChannelId:'c'};
+test('both review sources have stable scoped IDs, viewing never applies, skip and defer do not write content',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reviews-'));let applications=0,patches=0;let resolved=false;
+ const api={reviews:async()=>({reviews:[{id:'review-abc',title:'Missing page: Test',resolved,resolvedAction:resolved?'Skip':undefined}]}),patchReview:async()=>{patches++;resolved=true;}};
+ const store=async op=>{if(['list','detail'].includes(op.operation)){const value={reviews:[{id:'a'.repeat(16),file:'wiki/queries/review-'+ 'a'.repeat(16)+'.md',content:'proposal',proposalHash:'b'.repeat(64),metadata:null,risk:'legacy'}]};return op.operation==='list'?value:value.reviews[0];}applications++;throw Error('unexpected write');};
+ try{const r=await openReviewService({stateDir:root,api:async()=>api,store});const list=await r.list(scope);assert.equal(list.items.length,2);assert.equal(applications,0);const id=list.items[0].id;assert.match((await r.detail(scope,id)).text,/Missing page/);await assert.rejects(r.detail({...scope,SenderId:'other'},id),/not found/);await r.action(scope,id,'稍后','om_1');assert.equal(patches,0);await r.action(scope,id,'跳过','om_2');await r.action(scope,id,'跳过','om_2');assert.equal(patches,1);assert.equal(applications,0);assert.deepEqual((await r.list(scope)).items.map(x=>x.id),list.items.map(x=>x.id));await assert.rejects(r.action(scope,list.items[1].id,'应用','om_3'),/baseline/);}finally{await rm(root,{recursive:true,force:true});}
+});
+test('application resumes after API verification failure and skip resumes after native sync failure',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-recover-'));let writeCount=0,finalizeCount=0,good=false,patchCount=0,resolved=false;
+ const local={id:'a'.repeat(16),file:'wiki/queries/review-'+ 'a'.repeat(16)+'.md',content:'proposal',proposalHash:'b'.repeat(64),metadata:{path:'wiki/concepts/test.md'},risk:'safe'};
+ const store=async op=>{if(op.operation==='list')return{reviews:[local]};if(op.operation==='detail')return local;if(op.operation==='apply'){writeCount++;return{path:'wiki/concepts/test.md',hash:'514605d78c04d5e05027e7372d3baa41d6bd6a65a2cfb09ee9ba5a1f22e1e7e14',history:'history'};}if(op.operation==='finalize'){finalizeCount++;return{};}};
+ const {createHash}=await import('node:crypto');const digest=createHash('sha256').update('written').digest('hex');
+ const wrapped=async op=>{const value=await store(op);if(op.operation==='apply')value.hash=digest;return value;};
+ const api={read:async()=>good?'written':'wrong',reviews:async()=>({reviews:[{id:'review-abc',title:'Test',resolved,resolvedAction:resolved?'Skip':undefined}]}),patchReview:async()=>{patchCount++;if(patchCount===1)throw Error('HTTP 503');resolved=true;}};
+ try{let r=await openReviewService({stateDir:root,api:async()=>api,store:wrapped});const list=await r.list(scope);const localId=list.items.find(i=>i.kind==='markdown').id;await assert.rejects(r.action(scope,localId,'应用','om_a'),/verification failed/);assert.equal(finalizeCount,0);await assert.rejects(r.action(scope,localId,'跳过','om_b'),/must be recovered/);good=true;r=await openReviewService({stateDir:root,api:async()=>api,store:wrapped});assert.equal((await r.action(scope,localId,'应用','om_a')).status,'applied');await r.action(scope,localId,'应用','om_a');assert.equal(writeCount,2);assert.equal(finalizeCount,1);const native=list.items.find(i=>i.kind==='native').id;await assert.rejects(r.action(scope,native,'跳过','om_c'),/503/);assert.equal((await r.action(scope,native,'跳过','om_c')).status,'skipped');assert.equal(patchCount,2);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

@@ -3,16 +3,16 @@ import {mkdtemp,rm,readFile,readdir,writeFile} from 'node:fs/promises';import {j
 import {createPlugin} from '../openclaw/index.js';import {openRuntime} from '../openclaw/runtime.js';
 const scope={enabled:true,accountId:'default',entryAgentId:'xiaojie',allowedSenderIds:['ou_test'],allowedConversationIds:['oc_test']};
 const message={Provider:'feishu',AccountId:'default',AgentId:'xiaojie',SenderId:'ou_test',NativeChannelId:'oc_test',MessageSid:'om_test',rawText:'小婕 wk 记录：https://x.com/a/status/123'};
-test('hook reserves query, ignores GTD and unauthorized sender, does not process suppressed delivery',async()=>{
+test('hook executes query, reserves discussion and ignores GTD and unauthorized sender, does not process suppressed delivery',async()=>{
  let hook,calls=0;const replies=[];const api={pluginConfig:scope,config:{},logger:{warn(){}},registerService(){},registerTool(){},on(n,f){hook=f;}};
  const ctx={dispatcher:{sendFinalReply(p){replies.push(p.text);return true;},getQueuedCounts(){return{};}},recordProcessed(){},markIdle(){}};
- createPlugin({openRuntime:async()=>({accept:async()=>{calls++;return{duplicate:false};}})}).register(api);
+ createPlugin({openRuntime:async()=>({accept:async()=>{calls++;return{duplicate:false,text:'【Wiki】查询证据 [K-aaaaaaaaaaaaaaaa L1-L2]'};}})}).register(api);
  assert.equal(await hook({ctx:{...message,rawText:'小婕 GTD 收集：买菜'},sendPolicy:'allow'},ctx),undefined);
  assert.equal(await hook({ctx:{...message,SenderId:'ou_other'},sendPolicy:'allow'},ctx),undefined);
- await hook({ctx:{...message,rawText:'小婕 wk 查询：Canvas'},sendPolicy:'allow'},ctx);assert.match(replies[0],/暂未开放/);assert.equal(calls,0);
- await hook({ctx:{...message,rawText:'小婕 wk 讨论：Canvas'},sendPolicy:'allow'},ctx);assert.match(replies.at(-1),/暂未开放/);assert.equal(calls,0);
- await hook({ctx:message,sendPolicy:'deny'},ctx);assert.equal(calls,0);
- await hook({ctx:message,sendPolicy:'allow'},ctx);assert.equal(calls,1);assert.match(replies.at(-1),/收到/);
+ await hook({ctx:{...message,rawText:'小婕 wk 查询：Canvas'},sendPolicy:'allow'},ctx);assert.match(replies[0],/查询证据/);assert.equal(calls,1);
+ await hook({ctx:{...message,rawText:'小婕 wk 讨论：Canvas'},sendPolicy:'allow'},ctx);assert.match(replies.at(-1),/暂未开放/);assert.equal(calls,1);
+ await hook({ctx:message,sendPolicy:'deny'},ctx);assert.equal(calls,1);
+ await hook({ctx:message,sendPolicy:'allow'},ctx);assert.equal(calls,2);assert.match(replies.at(-1),/收到/);
 });
 
 test('failed processing produces one failure receipt and duplicate delivery does not rerun work',async()=>{
