@@ -58,3 +58,26 @@ class ReviewStoreTest(unittest.TestCase):
    meta.unlink()
    with self.assertRaisesRegex(RuntimeError,'Missing safe baseline'):self.call(v,'apply',id=rid,proposalHash=h)
    self.assertEqual(target.read_bytes(),old)
+ def test_process_sigkill_after_displacement_recovers_without_duplicate_or_lost_history(self):
+  with tempfile.TemporaryDirectory() as d:
+   v=pathlib.Path(d);rid,h,target,old=self.sample(v);meta=v/f'.personal-wiki/review-proposals/{rid}.json'
+   program='''import sys,json,os,signal
+sys.path.insert(0,sys.argv[1])
+from protected_store import Root,sha
+from review_store import apply
+root=Root(sys.argv[2]);lock=root.lock();original=Root.put
+def killed(self,path,data,replace=False):
+ if path=='wiki/concepts/test.md':os.kill(os.getpid(),signal.SIGKILL)
+ return original(self,path,data,replace)
+Root.put=killed
+apply(root,dict(id=sys.argv[3],proposalHash=sys.argv[4],metadataHash=sha(open(sys.argv[5],'rb').read())))
+'''
+   child=subprocess.run(['python3','-c',program,str(ROOT/'scripts'),str(v),rid,h,str(meta)],capture_output=True)
+   self.assertEqual(child.returncode,-9);self.assertFalse(target.exists())
+   result=self.call(v,'apply',id=rid,proposalHash=h);self.assertTrue(target.read_bytes().startswith(old));self.assertEqual((v/f'.personal-wiki/review-actions/{rid}/before.md').read_bytes(),old)
+   self.call(v,'finalize',id=rid,hash=result['hash']);content=target.read_bytes();self.call(v,'apply',id=rid,proposalHash=h);self.assertEqual(target.read_bytes(),content)
+ def test_changed_hidden_metadata_cannot_reuse_displayed_approval(self):
+  with tempfile.TemporaryDirectory() as d:
+   v=pathlib.Path(d);rid,h,target,old=self.sample(v);meta=v/f'.personal-wiki/review-proposals/{rid}.json';approved=hashlib.sha256(meta.read_bytes()).hexdigest();data=json.loads(meta.read_text());data['sourceUrl']='https://changed.invalid';meta.write_text(json.dumps(data))
+   with self.assertRaisesRegex(RuntimeError,'metadata changed'):self.call(v,'apply',id=rid,proposalHash=h,metadataHash=approved)
+   self.assertEqual(target.read_bytes(),old)

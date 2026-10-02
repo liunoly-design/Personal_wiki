@@ -125,6 +125,15 @@ if __name__ == '__main__':
             result = listing(root)
         elif operation == 'detail':
             result = proposal(root, request['id'])
+        elif operation == 'outcome':
+            p = proposal(root, request['id'])
+            raw = root.optional(f'.personal-wiki/review-actions/{p["id"]}/intent.json')
+            if raw is None:
+                result = dict(safeToAbandon=True)
+            else:
+                intent = json.loads(raw)
+                content = root.optional(intent['path'])
+                result = dict(safeToAbandon=(content is not None and sha(content) != intent['outputHash']) or (content is None and intent['previousHash'] is None))
         elif operation in ('apply', 'finalize'):
             lock = root.lock()
             result = apply(root, request) if operation == 'apply' else finalize(root, request)
