@@ -42,3 +42,9 @@ test('invalid or unavailable Codex selection never reads unfiltered candidates; 
  const q=await openKnowledgeQuery({stateDir:root,api:async()=>({search:async()=>({results:hits}),read:async()=>{reads++;return '# Evidence';},graph:async()=>({nodes:[],edges:[]})}),generate:async({prompt})=>{const ids=JSON.parse(chooseAll(prompt)).ids;return JSON.stringify({ids:[ids[0],ids[0]]});}});assert.match((await q.query(scope,{question:'Token'})).text,/筛选暂不可用/);assert.equal(reads,0);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('Codex can report insufficient evidence after reading without being misreported as a model failure',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-insufficient-query-'));
+ try{const q=await openKnowledgeQuery({stateDir:root,api:async()=>({search:async()=>({results:[{path:'wiki/sources/sample.md',title:'相关资料'}]}),read:async()=> '# 相关资料\n没有所问事实',graph:async()=>({nodes:[],edges:[]})}),generate:async({prompt,purpose})=>purpose==='select'?chooseAll(prompt):'WIKI_INSUFFICIENT_EVIDENCE'});
+ const r=await q.query(scope,{question:'医疗服务收费'});assert.match(r.text,/实际读取的正文没有足够证据/);assert.doesNotMatch(r.text,/模型暂不可用|引用未通过|WIKI_INSUFFICIENT|wiki\//);assert.match(r.text,/小婕 wk 阅读：/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
