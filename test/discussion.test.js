@@ -116,3 +116,12 @@ test('new Feishu message with same failed save command recovers original candida
  await f.send('om_save3',f.messages.om_save1);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
  }finally{await f.close();}
 });
+test('common source_id remains one independent source even when only translation links to original; empty discussion stays active',async()=>{
+ const f=await fixture();try{
+ f.api.search=async()=>({results:[]});const no=await f.send('om_none','小婕 wk 讨论：团队');f.api.search=async()=>({results:Object.keys(f.pages).map(path=>({path}))});
+ const after=await f.send('om_after','小婕 wk 讨论：继续');assert.equal(after.id,no.id);
+ f.pages['wiki/sources/old.md']='---\nsource_id: shared\n---\n# Chinese\n[原文](../../raw/sources/original.md)\n观点';
+ f.pages['wiki/sources/new.md']='---\nsource_id: shared\n---\n# English\nOpinion';
+ const d=await f.send('om_new','小婕 wk 新讨论：同一来源');await assert.rejects(f.send('om_s',`小婕 wk 综合：${d.id} 综合`),/两份独立来源/);
+ }finally{await f.close();}
+});

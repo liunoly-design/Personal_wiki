@@ -7,6 +7,16 @@ function validate(text,pages){
  if(typeof text!=='string'||!text.trim()||text.length>12000||!citations(text).length||citations(text).some(([,id,a,b])=>!pages.some(p=>p.id===id&&+a>=p.start&&+b<=p.end&&+a<=+b)))throw Error('讨论模型不可用或引用未通过校验；请重发相同命令恢复');
 }
 const evidenceKey=p=>[p.id,p.start,p.end,hash(p.content)].join(':');
+function independentSourceCount(pages){
+ const normalize=path=>path.replace(/^(?:raw|wiki)\/sources\//,'source-path/');
+ const groups=[];
+ for(const p of pages.filter(p=>/^(?:wiki|raw)\/sources\//.test(p.path)||p.originals?.length)){
+  const names=new Set([normalize(p.path),...(p.originals??[]).map(normalize),...(p.sourceId?['source-id:'+p.sourceId]:[])]);
+  for(let i=groups.length-1;i>=0;i--)if([...names].some(n=>groups[i].has(n))){for(const n of groups[i])names.add(n);groups.splice(i,1);}
+  groups.push(names);
+ }
+ return groups.length;
+}
 export async function openDiscussion({stateDir,python,knowledge,generate,api,store,reviews}){
  const directory=join(stateDir,'discussions');await mkdir(directory,{recursive:true,mode:0o700});
  async function withLock(scope,run){
@@ -20,13 +30,14 @@ export async function openDiscussion({stateDir,python,knowledge,generate,api,sto
   if(request?.retryOf)request=state.messages[request.retryOf];
   if(request?.result)return request.result;
   if(!request){
-   const prior=Object.entries(state.messages).find(([,r])=>!r.retryOf&&r.fingerprint===fingerprint&&(!r.result||(['save','synthesis'].includes(command.mode)&&hash(JSON.stringify(r.snapshot.turns))===hash(JSON.stringify(state.discussions[r.id]?.turns)))));
+   const prior=Object.entries(state.messages).find(([,r])=>!r.retryOf&&r.fingerprint===fingerprint&&(!r.result&&(['save','synthesis','end'].includes(command.mode)||r.snapshot.turns.length===state.discussions[r.id]?.turns.length)||(['save','synthesis'].includes(command.mode)&&hash(JSON.stringify(r.snapshot.turns))===hash(JSON.stringify(state.discussions[r.id]?.turns)))));
    if(prior){state.messages[messageId]={fingerprint,retryOf:prior[0]};request=prior[1];await saveJSON(statePath,state);if(request.result)return request.result;}
   }
   if(!request){
    let id=command.id??(command.mode==='new'?null:state.active);
    if(!id&&['turn','new'].includes(command.mode)){id='D-'+hash(scopeKey(scope)+messageId).slice(0,16);state.discussions[id]={id,topic:command.question,turns:[],pages:[],ended:false};}
    if(!id||!state.discussions[id])throw Error('Discussion not found in this user/conversation');
+   if(['turn','new'].includes(command.mode))state.active=id;
    request=state.messages[messageId]={id,fingerprint,origin:messageId,status:'pending',snapshot:structuredClone(state.discussions[id])};await saveJSON(statePath,state);
   }
   const live=state.discussions[request.id];
@@ -40,8 +51,7 @@ export async function openDiscussion({stateDir,python,knowledge,generate,api,sto
    if(!request.content){
     const basis=d.pages.filter(p=>!p.ownedNote);
     if(command.mode==='synthesis'){
-     const identities=new Set(basis.filter(p=>/^(?:wiki|raw)\/sources\//.test(p.path)||p.originals?.length).map(p=>p.sourceIdentity?.replace(/^raw\/sources\//,'source-path/')??p.path.replace(/^(?:raw|wiki)\/sources\//,'source-path/')));
-     if(identities.size<2)throw Error('综合需要至少两份独立来源；原文和译稿不算两份');
+     if(independentSourceCount(basis)<2)throw Error('综合需要至少两份独立来源；原文和译稿不算两份');
     }
     const promptContext=JSON.stringify({topic:d.topic,turns:d.turns,pages:d.pages});
     if(Buffer.byteLength(promptContext)>65536)throw Error('上下文达到限额；请先保存较短讨论');
