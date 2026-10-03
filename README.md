@@ -4,7 +4,7 @@
 
 2026-10-03：**0.6.1 已本机部署**，修复直接回复 Wiki 讨论的续聊，新增回复“小婕 wk 保存”原样保存指定长回复。Node97/Python42及双轴复审通过，真实消息关系只读隔离回放通过；真实用户入站与保存仍需验收。见[使用与测试手册](docs/v0.6-usage.md)与[回复修复验收](docs/research/v0.6.1-replies-2026-10-03.md)。
 
-本机已部署 Personal Wiki **0.6.1**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
+本机已部署 Personal Wiki **0.6.2**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。
 
 - `raw/sources/`：原始文章；`raw/assets/`：图片、视频等原始附件。
 - `wiki/sources/`：来源卡与完整中文阅读正文；`wiki/concepts/`、`wiki/entities/`：概念与实体。
@@ -20,7 +20,7 @@
 
 0.5.2 修复飞书分页阅读：隐藏YAML和逐行L前缀，保留Markdown结构、原始行号及续读命令，正确处理网页/站内/库内链接。见[规格](docs/specs/v0.5.2-reading.md)与[验收](docs/research/v0.5.2-reading-2026-10-03.md)。
 
-可用入口和验收范围见[当前用例清单](docs/current-capabilities.md)。
+可用入口和验收范围见[当前用例清单](docs/current-capabilities.md)。Wiki Agent 的过期“Vault 未接入”说明已修正，见[状态说明修复](docs/research/wiki-agent-save-status-2026-10-03.md)。
 
 共享 OpenClaw 已建立独立 `wiki` 运行 Agent，由飞书入口“小婕”调度；本项目插件已接入公开博客、X/微信、多链接及文本收集流程，查询和待审处理已接入，讨论已接入0.6。运行架构见上级 `OpenClaw/README.md`，当前接入范围见[飞书入口说明](docs/openclaw-wiki.md)。
 
