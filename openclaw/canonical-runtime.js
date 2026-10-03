@@ -33,7 +33,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
  const publicationStore=store??createReviewStore(config);
  const reviews=await openReviewService({stateDir:config.stateDir,api,notes,knowledge,store:publicationStore});
  const discussions=await openDiscussion({stateDir:config.stateDir,python:config.python,knowledge,generate,api,reviews,store:publicationStore});
- const quoted=await openQuotedReplies({stateDir:config.stateDir,api,knowledge,store:publicationStore});
+ const quoted=await openQuotedReplies({stateDir:config.stateDir,python:config.python,api,knowledge,store:publicationStore});
  const allowed=job=>config.allowedSenderIds.includes(job.sender)&&config.allowedConversationIds.includes(job.chat);
  function check(scope){if(scope.Provider!=='feishu'||scope.AccountId!==config.accountId||!allowed({sender:scope.SenderId,chat:scope.NativeChannelId}))throw Error('Wiki scope denied');}
  const queue=await openTaskQueue({stateDir:config.stateDir,python:config.python,allowed,
@@ -47,16 +47,17 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
    const result=await feishu.reply({replyTo:job.messageId,text:`【Wiki】记录完成，已通过 nashsu API 核验。\n标题：${job.result.title??"见来源卡"}\n摘要：${job.result.summary??"见来源卡"}\n正文：${job.result.source}\n${job.result.attachmentStatus==='partial'?'部分完成：正文已保存，附件缺失 '+(job.result.missingAssets?.length??0)+' 项。':'附件已核验。'}\n${job.result.contextStatus==='partial'?'上下文部分完成：'+job.result.contextGaps.join('；'):''}\n${job.result.supplements?.length?'补充附件：'+job.result.supplements.join('、'):''}\n${job.result.userRecord?'个人背景：'+job.result.userRecord:''}\n已取得的原文与附件已归档；处理临时文件已清理。\n待审修改：${job.result.reviews?.length??0} 项：${reviewIds.join("、")||"无"}（查看：小婕 wk 待审：；尚未应用）。`,uuid:job.id.slice(0,32)},{signal});
    if(!result?.message_id||result.chat_id!==job.chat)throw Error('Delivery result unknown');return result.message_id;
   }});
- async function acceptMessage(scope,id,signal,expectedURL,expectedActions){
+ async function acceptMessage(scope,id,signal,expectedURL,expectedActions,implicitOnly=false){
    check(scope);if(!/^om_[\w-]+$/u.test(id??''))throw Error('Message ID required');
-   const source=await feishu.getMessage(id,{signal});
+   let source;try{source=await feishu.getMessage(id,{signal});}catch(error){if(implicitOnly)return null;throw error;}
+   if(implicitOnly&&(!source.parent_id||!['text','post',undefined].includes(source.msg_type)))return null;
    if(source.message_id!==id||source.chat_id!==scope.NativeChannelId||source.sender?.id!==scope.SenderId||source.sender.id_type!=='open_id'||source.sender.sender_type!=='user'||source.deleted)throw Error('Source mismatch');
-   const userText=messageText(source);let parsed=parseCommand(userText);
+   let userText;try{userText=messageText(source);}catch(error){if(implicitOnly)return null;throw error;}let parsed=parseCommand(userText);
    if(parsed?.action==='reply'||!parsed){
     if(!source.parent_id){if(parsed?.action==='reply')throw Error('请在飞书回复要保存的那条消息，再发送“小婕 wk 保存”');return null;}
-    const parent=await feishu.getMessage(source.parent_id,{signal});
+    let parent;try{parent=await feishu.getMessage(source.parent_id,{signal});}catch(error){if(implicitOnly)return null;throw error;}
     if(parent.message_id!==source.parent_id||parent.chat_id!==scope.NativeChannelId||parent.deleted||parent.sender?.sender_type!=='app'||parent.sender?.id_type!=='app_id'||!account.appId||parent.sender?.id!==account.appId){if(parsed?.action==='reply')throw Error('只能保存当前授权会话中小婕发送的被回复消息');return null;}
-    const parentText=messageText(parent);
+    let parentText;try{parentText=messageText(parent);}catch(error){if(implicitOnly)return null;throw error;}
     if(parsed?.action==='reply'){if(expectedActions&&!expectedActions.includes('reply')&&!expectedActions.includes('discuss'))throw Error('Source command mismatch');return quoted.save(scope,parent,parentText,id,signal);}
     const discussionId=await discussions.resolveReply(scope,parentText);if(!discussionId)return null;
     parsed=parseCommand(`小婕 wk 讨论：${discussionId} ${userText}`);if(parsed?.action!=='discuss')throw Error('追问太长或格式不正确；请使用明确讨论命令');
@@ -97,7 +98,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
   }
  let controlIngress=Promise.resolve();
  return{
-  async acceptReply(scope,signal){return this.acceptMessage(scope,scope.MessageSidFull??scope.MessageSid,signal,undefined,['discuss']);},
+  async acceptReply(scope,signal){return this.acceptMessage(scope,scope.MessageSidFull??scope.MessageSid,signal,undefined,['discuss'],true);},
   async accept(scope,url,signal){return this.acceptMessage({...scope},scope.MessageSidFull??scope.MessageSid,signal,url);},
   acceptMessage(...args){const next=controlIngress.then(()=>acceptMessage.apply(this,args));controlIngress=next.catch(()=>{});return next;},
   knowledgeMessage(scope,id,kind,signal){const actions={discuss:['discuss','reply'],query:['query'],read:['read'],review:['review']}[kind];if(!actions)throw Error('Unknown knowledge tool');return this.acceptMessage(scope,id,signal,undefined,actions);},

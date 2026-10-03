@@ -165,6 +165,21 @@ test('reply-save verification outage survives restart and new message retry with
  const parent={message_id:'om_parent',chat_id:'oc_test',msg_type:'text',sender:{id:'cli_test',id_type:'app_id',sender_type:'app'},body:{content:JSON.stringify({text:'原模型回复\n不是已核验政策'})}};
  const get=f.options.feishu.getMessage;f.options.feishu.getMessage=async id=>id==='om_parent'?parent:{...await get(id),parent_id:'om_parent'};
  f.api.read=async()=>{throw Error('API offline');};f.messages.om_save1='小婕 wk 保存';await assert.rejects(f.runtime.knowledgeMessage(scope,'om_save1','discuss'),/offline/);
- await f.restart();f.api.read=async p=>readFile(join(f.config.vault,p),'utf8');f.api.search=async()=>({results:(await readdir(join(f.config.vault,'wiki/topics'))).map(n=>({path:'wiki/topics/'+n}))});f.messages.om_save2='小婕 wk 保存';const r=await f.runtime.knowledgeMessage(scope,'om_save2','discuss');assert.match(r.text,/核验/);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
+ parent.body.content=JSON.stringify({text:'被编辑后的内容，不应替换首次快照'});await f.restart();f.api.read=async p=>readFile(join(f.config.vault,p),'utf8');f.api.search=async()=>({results:(await readdir(join(f.config.vault,'wiki/topics'))).map(n=>({path:'wiki/topics/'+n}))});f.messages.om_save2='小婕 wk 保存';const r=await f.runtime.knowledgeMessage(scope,'om_save2','discuss');assert.match(r.text,/核验/);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
  }finally{await f.close();}
+});
+
+test('ordinary image, non-Wiki rich reply and lookup outage leave general agent in control',async()=>{
+ const f=await fixture();try{
+ f.options.feishu.getMessage=async id=>({message_id:id,chat_id:'oc_test',msg_type:'image',sender:{id:'ou_test',id_type:'open_id',sender_type:'user'},body:{content:'{"image_key":"img_test"}'}});
+ assert.equal(await f.runtime.acceptReply({...scope,MessageSid:'om_image'}),null);
+ f.options.feishu.getMessage=async()=>{throw Error('Feishu unavailable');};assert.equal(await f.runtime.acceptReply({...scope,MessageSid:'om_normal'}),null);
+ }finally{await f.close();}
+});
+import {openQuotedReplies} from '../src/quoted-replies.js';import {scopeKey} from '../src/knowledge-query.js';
+test('two independent save services serialize scoped snapshots with a process lock',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reply-lock-'));let entered,release;const started=new Promise(r=>entered=r);const gate=new Promise(r=>release=r);
+ const options={stateDir:root,python:'/usr/bin/python3',api:async()=>({read:async()=>'',search:async()=>({results:[{path:'wiki/topics/test.md'}]})}),knowledge:{register:async()=> 'K-aaaaaaaaaaaaaaaa'},store:async()=>{entered();await gate;return{pages:[],path:'wiki/topics/test.md'};}};
+ const a=await openQuotedReplies(options),b=await openQuotedReplies(options);const parent=id=>({message_id:id,body:{content:'test'}});
+ try{const first=a.save(scope,parent('om_a'),'A','om_save_a');await started;await assert.rejects(b.save(scope,parent('om_b'),'B','om_save_b'),/保存.*处理/);release();await first;await b.save(scope,parent('om_b'),'B','om_save_b');const state=JSON.parse(await readFile(join(root,'reply-saves',scopeKey(scope)+'.json'),'utf8'));assert.equal(state.om_save_a.status,'complete');assert.equal(state.om_save_b.status,'complete');}finally{release();await rm(root,{recursive:true,force:true});}
 });
