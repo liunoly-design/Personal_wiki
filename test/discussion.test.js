@@ -79,8 +79,8 @@ test('unknown evidence and unauthorized original messages refuse; no evidence is
  await assert.rejects(f.send('om_fake','小婕 wk 讨论：问题',{...scope,SenderId:'ou_intruder'}),/scope denied/);
  }finally{await f.close();}
 });
-test('twenty-turn limit is explicit and keeps the previous evidence and conclusions available',async()=>{
- const f=await fixture();try{const first=await f.send('om_0','小婕 wk 讨论：团队');for(let i=1;i<20;i++)await f.send('om_'+i,'小婕 wk 讨论：条件'+i);await assert.rejects(f.send('om_20','小婕 wk 讨论：继续'),/20轮限额/);assert.match((await f.send('om_end',`小婕 wk 结束讨论：${first.id}`)).text,/已结束/);}finally{await f.close();}
+test('topic identity continues beyond twenty turns with bounded model context and durable prior history',async()=>{
+ const f=await fixture();try{const first=await f.send('om_0','小婕 wk 讨论：团队');for(let i=1;i<20;i++)await f.send('om_'+i,'小婕 wk 讨论：条件'+i);assert.equal((await f.send('om_20','小婕 wk 讨论：继续')).id,first.id);assert.match((await f.send('om_end',`小婕 wk 结束讨论：${first.id}`)).text,/已结束/);}finally{await f.close();}
 });
 test('another authorized conversation cannot resume a discussion or see its unapproved synthesis',async()=>{
  const f=await fixture();try{
@@ -182,4 +182,73 @@ test('two independent save services serialize scoped snapshots with a process lo
  const options={stateDir:root,python:'/usr/bin/python3',api:async()=>({read:async()=>'',search:async()=>({results:[{path:'wiki/topics/test.md'}]})}),knowledge:{register:async()=> 'K-aaaaaaaaaaaaaaaa'},store:async()=>{entered();await gate;return{pages:[],path:'wiki/topics/test.md'};}};
  const a=await openQuotedReplies(options),b=await openQuotedReplies(options);const parent=id=>({message_id:id,body:{content:'test'}});
  try{const first=a.save(scope,parent('om_a'),'A','om_save_a');await started;await assert.rejects(b.save(scope,parent('om_b'),'B','om_save_b'),/保存.*处理/);release();await first;await b.save(scope,parent('om_b'),'B','om_save_b');const state=JSON.parse(await readFile(join(root,'reply-saves',scopeKey(scope)+'.json'),'utf8'));assert.equal(state.om_save_a.status,'complete');assert.equal(state.om_save_b.status,'complete');}finally{release();await rm(root,{recursive:true,force:true});}
+});
+
+test('same topic saves append only new turns with stable reading reference after restart; explicit new record alone creates a second page',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.api.read=async p=>f.pages[p]??readFile(join(f.config.vault,p),'utf8');
+ f.api.search=async()=>({results:[...Object.keys(f.pages),...(await readdir(join(f.config.vault,'wiki/topics')).catch(()=>[])).map(n=>'wiki/topics/'+n)].map(path=>({path}))});
+ const d=await f.send('om_cont_start','小婕 wk 讨论：团队\n用户判断：先试小团队');
+ const first=await f.send('om_cont_save',`小婕 wk 保存结论：${d.id}`);const [name]=await readdir(join(f.config.vault,'wiki/topics'));const path=join(f.config.vault,'wiki/topics',name);const old=await readFile(path,'utf8');
+ await f.restart();await f.send('om_cont_turn',`小婕 wk 讨论：${d.id} 新观点\n用户判断：大型组织暂不采用`);
+ const next=await f.send('om_cont_save2',`小婕 wk 保存结论：${d.id}`);assert.equal(next.readingId,first.readingId);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
+ const body=await readFile(path,'utf8');assert.ok(body.startsWith(old));assert.equal(body.split('先试小团队').length-1,1);assert.match(body,/大型组织暂不采用/);assert.match(body,/记录时间/);
+ const calls=f.calls;await f.send('om_cont_duplicate',`小婕 wk 保存结论：${d.id}`);assert.equal(await readFile(path,'utf8'),body);assert.equal(f.calls,calls);
+ const fresh=await f.send('om_cont_fresh',`小婕 wk 新记录：${d.id}`);assert.notEqual(fresh.readingId,first.readingId);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,2);assert.equal(await readFile(path,'utf8'),body);
+ }finally{await f.close();}
+});
+
+test('exact save of an authenticated topic reply appends to its bound document with no model rewrite and retains original bytes',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.options.hostConfig.channels={feishu:{appId:'cli_test'}};await f.restart();
+ f.api.read=async p=>f.pages[p]??readFile(join(f.config.vault,p),'utf8');f.api.search=async()=>({results:[...Object.keys(f.pages),...(await readdir(join(f.config.vault,'wiki/topics')).catch(()=>[])).map(n=>'wiki/topics/'+n)].map(path=>({path}))});
+ const d=await f.send('om_exact_start','小婕 wk 讨论：团队');const saved=await f.send('om_exact_conclusion',`小婕 wk 保存结论：${d.id}`);const [name]=await readdir(join(f.config.vault,'wiki/topics'));const path=join(f.config.vault,'wiki/topics',name);const before=await readFile(path,'utf8');
+ const parent={message_id:'om_exact_parent',chat_id:'oc_test',msg_type:'text',create_time:'1000',sender:{id:'cli_test',id_type:'app_id',sender_type:'app'},body:{content:JSON.stringify({text:d.text})}};
+ const get=f.options.feishu.getMessage;f.options.feishu.getMessage=async id=>id===parent.message_id?parent:{...await get(id),parent_id:parent.message_id};
+ const calls=f.calls;f.messages.om_exact_save='小婕 wk 保存';const r=await f.runtime.knowledgeMessage(scope,'om_exact_save','discuss');assert.equal(r.readingId,saved.readingId);assert.equal(f.calls,calls);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
+ const body=await readFile(path,'utf8');assert.ok(body.startsWith(before));assert.ok(body.includes(d.text));assert.match(body,/未经 Wiki/);
+ const raw=(await readdir(join(f.config.vault,'raw/sources')))[0];assert.equal(await readFile(join(f.config.vault,'raw/sources',raw),'utf8'),d.text);
+ f.messages.om_exact_repeat='小婕 wk 保存';await f.runtime.knowledgeMessage(scope,'om_exact_repeat','discuss');assert.equal(await readFile(path,'utf8'),body);
+ }finally{await f.close();}
+});
+
+test('append API search outage freezes the new-turn candidate and resumes before saving later turns',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.api.read=async p=>f.pages[p]??readFile(join(f.config.vault,p),'utf8');
+ const search=async()=>({results:[...Object.keys(f.pages),...(await readdir(join(f.config.vault,'wiki/topics')).catch(()=>[])).map(n=>'wiki/topics/'+n)].map(path=>({path}))});f.api.search=search;
+ const d=await f.send('om_ap_start','小婕 wk 讨论：团队\n用户判断：早期判断');const first=await f.send('om_ap_first',`小婕 wk 保存结论：${d.id}`);
+ await f.send('om_ap_turn',`小婕 wk 讨论：${d.id} 新证据\n用户判断：第二判断`);f.api.search=async()=>({results:[]});
+ await assert.rejects(f.send('om_ap_save',`小婕 wk 保存结论：${d.id}`),/搜索核验/);await f.restart();f.api.search=search;
+ await f.send('om_ap_later',`小婕 wk 讨论：${d.id} 后续\n用户判断：第三判断`);const calls=f.calls;
+ const recovered=await f.send('om_ap_retry',`小婕 wk 保存结论：${d.id}`);assert.equal(recovered.readingId,first.readingId);assert.equal(f.calls,calls);
+ const [name]=await readdir(join(f.config.vault,'wiki/topics'));let body=await readFile(join(f.config.vault,'wiki/topics',name),'utf8');assert.equal(body.split('第二判断').length-1,1);assert.doesNotMatch(body,/第三判断/);
+ await f.send('om_ap_final',`小婕 wk 保存结论：${d.id}`);body=await readFile(join(f.config.vault,'wiki/topics',name),'utf8');for(const judgment of ['早期判断','第二判断','第三判断'])assert.equal(body.split(judgment).length-1,1);
+ }finally{await f.close();}
+});
+
+test('failed explicit new-record save cannot be hidden by a no-new-turn save of the previous document',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.api.read=async p=>f.pages[p]??readFile(join(f.config.vault,p),'utf8');
+ f.api.search=async()=>({results:[...Object.keys(f.pages),...(await readdir(join(f.config.vault,'wiki/topics')).catch(()=>[])).map(n=>'wiki/topics/'+n)].map(path=>({path}))});
+ const d=await f.send('om_nr_start','小婕 wk 讨论：团队');await f.send('om_nr_first',`小婕 wk 保存结论：${d.id}`);const read=f.api.read;f.api.read=async()=>{throw Error('offline');};
+ await assert.rejects(f.send('om_nr_new',`小婕 wk 新记录：${d.id}`),/offline/);f.api.read=read;
+ await assert.rejects(f.send('om_nr_wrong',`小婕 wk 保存结论：${d.id}`),/尚未核验/);
+ const r=await f.send('om_nr_retry',`小婕 wk 新记录：${d.id}`);const after=await f.send('om_nr_saved',`小婕 wk 保存结论：${d.id}`);assert.equal(after.readingId,r.readingId);
+ }finally{await f.close();}
+});
+
+test('legacy 0.6.1 document adopted through exact reply keeps its saved-turn cursor on the next conclusion',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.options.hostConfig.channels={feishu:{appId:'cli_test'}};await f.restart();
+ f.api.read=async p=>f.pages[p]??readFile(join(f.config.vault,p),'utf8');f.api.search=async()=>({results:[...Object.keys(f.pages),...(await readdir(join(f.config.vault,'wiki/topics')).catch(()=>[])).map(n=>'wiki/topics/'+n)].map(path=>({path}))});
+ const d=await f.send('om_lg_start','小婕 wk 讨论：团队\n用户判断：旧版判断');const first=await f.send('om_lg_save',`小婕 wk 保存结论：${d.id}`);
+ const {hash}=await import('../src/knowledge-query.js');const {rename}=await import('node:fs/promises');const legacy='wiki/topics/discussion-'+hash(scopeKey(scope)+'om_lg_save').slice(0,16)+'.md';await rename(join(f.config.vault,first.path),join(f.config.vault,legacy));
+ await rm(join(f.config.vault,'.personal-wiki/topics'),{recursive:true,force:true});await rm(join(f.config.vault,'.personal-wiki/topic-actions'),{recursive:true,force:true});
+ const statePath=join(f.config.stateDir,'discussions',scopeKey(scope)+'.json');const state=JSON.parse(await readFile(statePath,'utf8'));delete state.discussions[d.id].savedTurns;delete state.discussions[d.id].savedResult;delete state.messages.om_lg_save.result.path;await writeFile(statePath,JSON.stringify(state));await f.restart();
+ const parent={message_id:'om_lg_parent',chat_id:'oc_test',msg_type:'text',sender:{id:'cli_test',id_type:'app_id',sender_type:'app'},body:{content:JSON.stringify({text:d.text})}};
+ const get=f.options.feishu.getMessage;f.options.feishu.getMessage=async id=>id===parent.message_id?parent:{...await get(id),...(id==='om_lg_exact'?{parent_id:parent.message_id}:{})};
+ f.messages.om_lg_exact='小婕 wk 保存';await f.runtime.knowledgeMessage(scope,'om_lg_exact','discuss');
+ await f.send('om_lg_next',`小婕 wk 讨论：${d.id} 新观点\n用户判断：新版判断`);const r=await f.send('om_lg_save_next',`小婕 wk 保存结论：${d.id}`);assert.equal(r.path,legacy);
+ const body=await readFile(join(f.config.vault,legacy),'utf8');assert.equal(body.split('> 旧版判断').length-1,1);assert.equal(body.split('> 新版判断').length-1,1);
+ }finally{await f.close();}
 });

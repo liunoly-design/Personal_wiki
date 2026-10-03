@@ -1,5 +1,7 @@
 # 个人 Wiki / Personal Wiki
 
+0.6.2 同议题持续记录：明确保存默认追加同一文档，显式新记录才另建；原回复保真、稳定D/K、历史与未知结果恢复。见[使用与验收](docs/v0.6.2-usage.md)、[SPEC](docs/specs/v0.6.2-continuous-topic.md)、[实际交付证据](docs/research/v0.6.2-acceptance-2026-10-03.md)。真实飞书体验仍需用户发起验收。
+
 2026-10-03：**0.6.1 已本机部署**，修复直接回复 Wiki 讨论的续聊，新增回复“小婕 wk 保存”原样保存指定长回复。Node97/Python42及双轴复审通过，真实消息关系只读隔离回放通过；真实用户入站与保存仍需验收。见[使用与测试手册](docs/v0.6-usage.md)与[回复修复验收](docs/research/v0.6.1-replies-2026-10-03.md)。
 
 本机已部署 Personal Wiki **0.6.1**，使用 nashsu 作为正式资料库。名词解释、全文中文翻译、图片和公开 X 视频下载、忠实 Markdown 整理均沿用已有采集链路。

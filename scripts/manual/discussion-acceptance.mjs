@@ -32,7 +32,7 @@ try{
  let saved=false,approved=false;
  if(synthetic){
   const savedResult=await discussion.execute(scope,parseCommand('小婕 wk 保存结论：'+d.id),'om_save_'+stamp);saved=Boolean(savedResult.readingId);
-  const key=createHash('sha256').update(createHash('sha256').update(JSON.stringify([scope.SenderId,scope.NativeChannelId])).digest('hex')+'om_save_'+stamp).digest('hex');created.push('wiki/topics/discussion-'+key.slice(0,16)+'.md');
+  const key=createHash('sha256').update(createHash('sha256').update(JSON.stringify([scope.SenderId,scope.NativeChannelId])).digest('hex')+'om_save_'+stamp).digest('hex');created.push(savedResult.path,'.personal-wiki/topic-actions/'+key,'.personal-wiki/topics/'+createHash('sha256').update(JSON.stringify([scope.SenderId,scope.NativeChannelId])).digest('hex')+'/'+d.id+'.json');
   const proposal=await discussion.execute(scope,parseCommand('小婕 wk 综合：'+d.id+' 合成验收 '+stamp),'om_synth_'+stamp);rid=proposal.reviewId;
   const detail=await reviews.detail(scope,rid);const local=detail.item.proposalId;
   created.push('wiki/queries/review-'+local+'.md','.personal-wiki/review-proposals/'+local+'.json','.personal-wiki/review-actions/'+local,detail.item.metadata.path);

@@ -32,7 +32,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
  const knowledge=await openKnowledgeQuery({stateDir:config.stateDir,api,notes,generate});
  const publicationStore=store??createReviewStore(config);
  const reviews=await openReviewService({stateDir:config.stateDir,api,notes,knowledge,store:publicationStore});
- const discussions=await openDiscussion({stateDir:config.stateDir,python:config.python,knowledge,generate,api,reviews,store:publicationStore});
+ const discussions=await openDiscussion({stateDir:config.stateDir,python:config.python,knowledge,generate,api,reviews,store:publicationStore,model:config.compilerModel??'gpt-6-sol'});
  const quoted=await openQuotedReplies({stateDir:config.stateDir,python:config.python,api,knowledge,store:publicationStore});
  const allowed=job=>config.allowedSenderIds.includes(job.sender)&&config.allowedConversationIds.includes(job.chat);
  function check(scope){if(scope.Provider!=='feishu'||scope.AccountId!==config.accountId||!allowed({sender:scope.SenderId,chat:scope.NativeChannelId}))throw Error('Wiki scope denied');}
@@ -58,7 +58,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
     let parent;try{parent=await feishu.getMessage(source.parent_id,{signal});}catch(error){if(implicitOnly)return null;throw error;}
     if(parent.message_id!==source.parent_id||parent.chat_id!==scope.NativeChannelId||parent.deleted||parent.sender?.sender_type!=='app'||parent.sender?.id_type!=='app_id'||!account.appId||parent.sender?.id!==account.appId){if(parsed?.action==='reply')throw Error('只能保存当前授权会话中小婕发送的被回复消息');return null;}
     let parentText;try{parentText=messageText(parent);}catch(error){if(implicitOnly)return null;throw error;}
-    if(parsed?.action==='reply'){if(expectedActions&&!expectedActions.includes('reply')&&!expectedActions.includes('discuss'))throw Error('Source command mismatch');return quoted.save(scope,parent,parentText,id,signal);}
+    if(parsed?.action==='reply'){if(expectedActions&&!expectedActions.includes('reply')&&!expectedActions.includes('discuss'))throw Error('Source command mismatch');const topicId=await discussions.resolveReply(scope,parentText);return quoted.save(scope,parent,parentText,id,signal,topicId,topicId?await discussions.legacyBinding(scope,topicId):undefined);}
     const discussionId=await discussions.resolveReply(scope,parentText);if(!discussionId)return null;
     parsed=parseCommand(`小婕 wk 讨论：${discussionId} ${userText}`);if(parsed?.action!=='discuss')throw Error('追问太长或格式不正确；请使用明确讨论命令');
    }

@@ -62,6 +62,11 @@ def apply(root, request):
         if current is not None:
             root.immutable(job + '/before.md', current)
         root.immutable(record_path, encode(intent))
+    return publish_intent(root, job, intent)
+
+
+def publish_intent(root, job, intent):
+    target = intent["path"]
     displaced = job + '/displaced.md'
     moved = root.optional(displaced)
     current = root.optional(target)
@@ -132,8 +137,101 @@ def publish_quoted_reply(root, request):
     body += f'\n\n## 保存来源\n\n飞书消息：{message_id}；发送时间戳：{message.get("create_time", "unknown")}\n\n[原回复正文](../../{raw_text}) · [原始消息记录](../../{raw_json})\n'
     root.immutable(raw_json, record)
     root.immutable(raw_text, text.encode())
+    if request.get('discussionId'):
+        if not isinstance(request.get('savedAt'), str):
+            raise ValueError('Missing saved reply timestamp')
+        body = '记录时间：' + request['savedAt'] + '\n\n' + body
+        binding = topic_info(root, request)
+        previous = root.optional(f'.personal-wiki/topic-actions/{key}/intent.json')
+        cursor = json.loads(previous)['cursor'] if previous else (binding.get('cursor', 0) if binding.get('path') else request.get('legacyCursor', 0))
+        result = append_topic(root, {**request, 'content': body, 'cursor': cursor})
+        return {**result, 'pages': [dict(path=result['path'], hash=result['hash']), dict(path=raw_text, hash=sha(text.encode()))]}
     root.immutable(path, body.encode())
     return dict(path=path, pages=[dict(path=path, hash=sha(body.encode())), dict(path=raw_text, hash=sha(text.encode()))])
+
+
+def topic_identity(request):
+    scope, discussion = request.get('scope', ''), request.get('discussionId', '')
+    if not re.fullmatch('[a-f0-9]{64}', scope) or not re.fullmatch('D-[a-f0-9]{16}', discussion):
+        raise ValueError('Invalid topic identity')
+    return f'.personal-wiki/topics/{scope}/{discussion}.json'
+
+
+def topic_info(root, request):
+    binding = root.optional(topic_identity(request))
+    return json.loads(binding) if binding else dict(cursor=0)
+
+
+def append_topic(root, request):
+    binding_path = topic_identity(request)
+    key, content = request.get('key', ''), request.get('content')
+    if not re.fullmatch('[a-f0-9]{64}', key) or not isinstance(content, str) or not content.strip() or len(content.encode()) > 100000:
+        raise ValueError('Invalid topic entry')
+    cursor = request.get('cursor', 0)
+    if not isinstance(cursor, int) or cursor < 0 or not isinstance(request.get('newRecord', False), bool):
+        raise ValueError('Invalid topic cursor')
+    binding = topic_info(root, request)
+    if binding.get('pending') and binding['pending'] != key:
+        raise ValueError('同议题保存尚未核验；请先重发原保存命令恢复')
+    job = f'.personal-wiki/topic-actions/{key}'
+    previous = root.optional(job + '/intent.json')
+    if previous:
+        intent = json.loads(previous)
+        if intent['entry'] != content or intent['binding'] != binding_path or intent['cursor'] != cursor or intent['newRecord'] != request.get('newRecord', False):
+            raise ValueError('Topic save request changed')
+    else:
+        if root.optional(job + '/complete.json'):
+            raise ValueError('Missing topic intent')
+        path = binding.get('path')
+        legacy = request.get('legacyPath')
+        if not path and legacy:
+            if not re.fullmatch(r'wiki/topics/discussion-[a-f0-9]{16}\.md', legacy):
+                raise ValueError('Invalid legacy discussion path')
+            root.read(legacy)  # Never silently replace a missing historical binding.
+            path = legacy
+        if request.get('newRecord') or not path:
+            identity = key if request.get('newRecord') else sha(binding_path.encode())
+            path = f'wiki/topics/discussion-{identity[:16]}.md'
+        current = root.optional(path)
+        # A previously bound document disappearing must not be recreated silently.
+        if path == binding.get('path') and current is None:
+            raise ValueError('Bound topic document missing; reconcile before saving')
+        addition = f'\n\n## 持续记录 {key[:16]}\n\n' + content
+        output = (current or b'') + addition.encode()
+        intent = dict(path=path, binding=binding_path, previousHash=sha(current) if current is not None else None,
+                      outputHash=sha(output), content=output.decode(), entry=content, cursor=cursor,
+                      newRecord=request.get('newRecord', False))
+        if current is not None:
+            root.immutable(job + '/before.md', current)
+        root.immutable(job + '/intent.json', encode(intent))
+    if root.optional(job + '/complete.json'):
+        # Reconcile an acknowledged write after the caller lost its response.
+        current = root.read(intent['path'])
+        if not current.startswith(intent['content'].encode()):
+            raise ValueError('Completed topic entry edited; manual reconciliation required')
+        return dict(path=intent['path'], hash=sha(current), entryId=key[:16], history=job)
+    root.put(binding_path, encode({**binding, 'pending': key}), replace=True)
+    return {**publish_intent(root, job, intent), 'entryId': key[:16]}
+
+
+def finalize_topic(root, request):
+    key = request.get('key', '')
+    if not re.fullmatch('[a-f0-9]{64}', key):
+        raise ValueError('Invalid topic save key')
+    job = f'.personal-wiki/topic-actions/{key}'
+    intent = json.loads(root.read(job + '/intent.json'))
+    if intent['binding'] != topic_identity(request) or sha(root.read(intent['path'])) != request['hash']:
+        raise ValueError('Topic changed before verification')
+    if intent['previousHash'] is not None and sha(root.read(job + '/displaced.md')) != intent['previousHash']:
+        raise ValueError('Concurrent edit retained in history; manual reconciliation required')
+    binding = topic_info(root, request)
+    if binding.get('pending') not in (None, key):
+        raise ValueError('Another topic save is pending')
+    if not root.optional(job + '/complete.json'):
+        root.immutable(job + '/complete.json', encode(dict(path=intent['path'], hash=request['hash'])))
+    if binding.get('pending') == key:
+        root.put(intent['binding'], encode(dict(path=intent['path'], cursor=max(binding.get('cursor', 0), intent['cursor']))), replace=True)
+    return dict(path=intent['path'], hash=request['hash'])
 
 
 def publish_discussion(root, request):
@@ -191,6 +289,9 @@ if __name__ == '__main__':
                 intent = json.loads(raw)
                 content = root.optional(intent['path'])
                 result = dict(safeToAbandon=(content is not None and sha(content) != intent['outputHash']) or (content is None and intent['previousHash'] is None))
+        elif operation in ('topic-info', 'topic-append', 'topic-finalize'):
+            lock = root.lock()
+            result = {'topic-info': topic_info, 'topic-append': append_topic, 'topic-finalize': finalize_topic}[operation](root, request)
         elif operation == 'quoted-reply':
             lock = root.lock()
             result = publish_quoted_reply(root, request)

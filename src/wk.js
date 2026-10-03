@@ -4,12 +4,12 @@ import {join} from 'node:path';
 export function parseCommand(text) {
  if(typeof text!=='string')return null;
  if(/^小婕\s*wk\s+保存\s*[：:]?\s*$/u.test(text))return {action:'reply',mode:'save'};
- const discussion=text.match(/^小婕\s*wk\s+(讨论|新讨论|结束讨论|保存结论|综合)\s*[：:]\s*([\s\S]*)$/u);
+ const discussion=text.match(/^小婕\s*wk\s+(讨论|新讨论|结束讨论|保存结论|新记录|综合)\s*[：:]\s*([\s\S]*)$/u);
  if(discussion){
   const [,command,body]=discussion;if(body.length>3000)return {action:'invalid'};
-  if(['结束讨论','保存结论','综合'].includes(command)){
+  if(['结束讨论','保存结论','新记录','综合'].includes(command)){
    const m=body.match(/^(D-[a-f0-9]{16})(?:[ \t]+([^\n]{1,120}))?\s*$/u);
-   return m&&(command==='综合'||!m[2])?{action:'discuss',mode:{结束讨论:'end',保存结论:'save',综合:'synthesis'}[command],id:m[1],title:m[2]??''}:{action:'invalid'};
+   return m&&(command==='综合'||!m[2])?{action:'discuss',mode:{结束讨论:'end',保存结论:'save',新记录:'save-new',综合:'synthesis'}[command],id:m[1],title:m[2]??''}:{action:'invalid'};
   }
   let id;let remainder=body.trim();const m=remainder.match(/^(D-[a-f0-9]{16})\s+([\s\S]+)$/u);if(m){id=m[1];remainder=m[2];}
   if(command==='新讨论'&&id)return {action:'invalid'};
@@ -22,7 +22,7 @@ export function parseCommand(text) {
   }
   const question=questions.join('\n').trim();return question&&question.length<=2000&&judgment.length<=1000&&sources.length<=5?{action:'discuss',mode:command==='新讨论'?'new':'turn',question,id,sources,judgment}:{action:'invalid'};
  }
- if(/^小婕\s*wk\s+(讨论|新讨论|结束讨论|保存结论|综合)/u.test(text))return {action:'invalid'};
+ if(/^小婕\s*wk\s+(讨论|新讨论|结束讨论|保存结论|新记录|综合)/u.test(text))return {action:'invalid'};
  const knowledge=text.match(/^小婕\s*wk\s+(查询|阅读|待审|应用|跳过|稍后)\s*[：:]\s*([\s\S]*)$/u);
  if(knowledge){
   const [,mode,body]=knowledge;
