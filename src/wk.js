@@ -3,6 +3,7 @@ import {join} from 'node:path';
 
 export function parseCommand(text) {
  if(typeof text!=='string')return null;
+ if(/^小婕\s*wk\s+保存\s*[：:]?\s*$/u.test(text))return {action:'reply',mode:'save'};
  const discussion=text.match(/^小婕\s*wk\s+(讨论|新讨论|结束讨论|保存结论|综合)\s*[：:]\s*([\s\S]*)$/u);
  if(discussion){
   const [,command,body]=discussion;if(body.length>3000)return {action:'invalid'};

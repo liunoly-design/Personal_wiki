@@ -53,3 +53,10 @@ test('Flash 402 receipt separates saved capture from incomplete analysis',async(
  const r=await openRuntime({config:{...scope,stateDir:dir,vault:dir,python:'/usr/bin/python3'},hostConfig:{},flash:{},feishu:{getMessage:async()=>original,reply:async m=>{sent.push(m.text);return{message_id:'om_reply',chat_id:'oc_test'};}},makeAdapters:()=>({capture:async()=>({directory:'/saved',text:'article'}),extract:async()=>{throw Error('Flash HTTP 402; original retained');}})});
  try{await r.accept(message,'https://x.com/a/status/123');await r.processJobs();assert.match(sent[0],/抓取已完成/);assert.match(sent[0],/Flash.*402/);assert.match(sent[0],/分析尚未完成/);assert.doesNotMatch(sent[0],/登录/);}finally{await r.close();await rm(dir,{recursive:true,force:true});}
 });
+test('plain reply to a Wiki discussion is offered to authenticated reply routing instead of general analysis',async()=>{
+ let hook;const replies=[];let offered=0;const api={pluginConfig:scope,config:{},logger:{warn(){}},registerService(){},registerTool(){},on(n,f){hook=f;}};
+ createPlugin({openRuntime:async()=>({acceptReply:async()=>{offered++;return {text:'【Wiki】讨论 D-aaaaaaaaaaaaaaaa\n继续同一讨论'};}})}).register(api);
+ const ctx={dispatcher:{sendFinalReply(p){replies.push(p.text);return true;},getQueuedCounts(){return{};}},recordProcessed(){},markIdle(){}};
+ const result=await hook({ctx:{...message,rawText:'上海如何核算设备成本？',ReplyToId:'om_discussion'},sendPolicy:'allow'},ctx);
+ assert.equal(offered,1);assert.equal(result?.handled,true);assert.match(replies[0],/继续同一讨论/);
+});

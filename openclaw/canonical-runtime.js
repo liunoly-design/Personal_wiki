@@ -3,6 +3,8 @@ import {join,isAbsolute,resolve,relative} from 'node:path';
 import {createHash} from 'node:crypto';
 import {openTaskQueue} from '../src/task-queue.js';
 import {collectCanonical} from '../src/canonical-library.js';
+import {messageText} from '../src/feishu-message.js';
+import {openQuotedReplies} from '../src/quoted-replies.js';
 import {parseCommand} from '../src/wk.js';
 import {createFlash} from '../src/flash.js';
 import {openKnowledgeQuery} from '../src/knowledge-query.js';
@@ -31,6 +33,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
  const publicationStore=store??createReviewStore(config);
  const reviews=await openReviewService({stateDir:config.stateDir,api,notes,knowledge,store:publicationStore});
  const discussions=await openDiscussion({stateDir:config.stateDir,python:config.python,knowledge,generate,api,reviews,store:publicationStore});
+ const quoted=await openQuotedReplies({stateDir:config.stateDir,api,knowledge,store:publicationStore});
  const allowed=job=>config.allowedSenderIds.includes(job.sender)&&config.allowedConversationIds.includes(job.chat);
  function check(scope){if(scope.Provider!=='feishu'||scope.AccountId!==config.accountId||!allowed({sender:scope.SenderId,chat:scope.NativeChannelId}))throw Error('Wiki scope denied');}
  const queue=await openTaskQueue({stateDir:config.stateDir,python:config.python,allowed,
@@ -48,7 +51,16 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
    check(scope);if(!/^om_[\w-]+$/u.test(id??''))throw Error('Message ID required');
    const source=await feishu.getMessage(id,{signal});
    if(source.message_id!==id||source.chat_id!==scope.NativeChannelId||source.sender?.id!==scope.SenderId||source.sender.id_type!=='open_id'||source.sender.sender_type!=='user'||source.deleted)throw Error('Source mismatch');
-   const parsed=parseCommand(JSON.parse(source.body.content).text);
+   const userText=messageText(source);let parsed=parseCommand(userText);
+   if(parsed?.action==='reply'||!parsed){
+    if(!source.parent_id){if(parsed?.action==='reply')throw Error('请在飞书回复要保存的那条消息，再发送“小婕 wk 保存”');return null;}
+    const parent=await feishu.getMessage(source.parent_id,{signal});
+    if(parent.message_id!==source.parent_id||parent.chat_id!==scope.NativeChannelId||parent.deleted||parent.sender?.sender_type!=='app'||parent.sender?.id_type!=='app_id'||!account.appId||parent.sender?.id!==account.appId){if(parsed?.action==='reply')throw Error('只能保存当前授权会话中小婕发送的被回复消息');return null;}
+    const parentText=messageText(parent);
+    if(parsed?.action==='reply'){if(expectedActions&&!expectedActions.includes('reply')&&!expectedActions.includes('discuss'))throw Error('Source command mismatch');return quoted.save(scope,parent,parentText,id,signal);}
+    const discussionId=await discussions.resolveReply(scope,parentText);if(!discussionId)return null;
+    parsed=parseCommand(`小婕 wk 讨论：${discussionId} ${userText}`);if(parsed?.action!=='discuss')throw Error('追问太长或格式不正确；请使用明确讨论命令');
+   }
    if(expectedActions&&!expectedActions.includes(parsed?.action))throw Error('Source command mismatch');
    if(parsed?.action==='discuss')return discussions.execute(scope,parsed,id,signal);
    if(parsed?.action==='query')return knowledge.query(scope,parsed,signal);
@@ -85,9 +97,10 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
   }
  let controlIngress=Promise.resolve();
  return{
+  async acceptReply(scope,signal){return this.acceptMessage(scope,scope.MessageSidFull??scope.MessageSid,signal,undefined,['discuss']);},
   async accept(scope,url,signal){return this.acceptMessage({...scope},scope.MessageSidFull??scope.MessageSid,signal,url);},
   acceptMessage(...args){const next=controlIngress.then(()=>acceptMessage.apply(this,args));controlIngress=next.catch(()=>{});return next;},
-  knowledgeMessage(scope,id,kind,signal){const actions={discuss:['discuss'],query:['query'],read:['read'],review:['review']}[kind];if(!actions)throw Error('Unknown knowledge tool');return this.acceptMessage(scope,id,signal,undefined,actions);},
+  knowledgeMessage(scope,id,kind,signal){const actions={discuss:['discuss','reply'],query:['query'],read:['read'],review:['review']}[kind];if(!actions)throw Error('Unknown knowledge tool');return this.acceptMessage(scope,id,signal,undefined,actions);},
   async status(scope,id){check(scope);const job=await queue.status(id);if(!job||job.sender!==scope.SenderId||job.chat!==scope.NativeChannelId)throw Error('Job not found');return{jobId:id,url:job.url,...(job.status==='waiting_login'?{loginCommand:loginCommand(job,config)}:{}),controlMessageIds:job.controlMessages??[],mediaApprovals:job.mediaApprovals??{},status:job.status,stage:job.stage,createdAt:job.createdAt,result:job.result??null,reason:job.failure??null,nextAttemptAt:job.nextAttemptAt??null,receiptConfirmed:Boolean(job.receiptId)};},
   async retryTranslation(scope,id){const job=await this.status(scope,id);if(['waiting_login','waiting_confirmation','waiting_media'].includes(job.status))throw Error('Use the explicit recovery command');await queue.retry(id);return{jobId:id,status:'queued'};},
   start:queue.start,processJobs:queue.drain,

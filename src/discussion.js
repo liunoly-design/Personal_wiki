@@ -1,6 +1,7 @@
 import {join,resolve} from 'node:path';
 import {mkdir} from 'node:fs/promises';import {spawn} from 'node:child_process';
 import {saveJSON,optionalJSON} from './durable-files.js';
+import {comparableText} from './feishu-message.js';
 import {hash,scopeKey} from './knowledge-query.js';
 const citations=text=>[...text.matchAll(/\[(K-[a-f0-9]{16}) L(\d+)-L(\d+)\]/g)];
 function validate(text,pages){
@@ -10,7 +11,7 @@ const evidenceKey=p=>[p.id,p.start,p.end,hash(p.content)].join(':');
 function independentSourceCount(pages){
  const normalize=path=>path.replace(/^(?:raw|wiki)\/sources\//,'source-path/');
  const groups=[];
- for(const p of pages.filter(p=>/^(?:wiki|raw)\/sources\//.test(p.path)||p.originals?.length)){
+ for(const p of pages.filter(p=>!p.modelReply&&(/^(?:wiki|raw)\/sources\//.test(p.path)||p.originals?.length))){
   const names=new Set([normalize(p.path),...(p.originals??[]).map(normalize),...(p.sourceId?['source-id:'+p.sourceId]:[])]);
   for(let i=groups.length-1;i>=0;i--)if([...names].some(n=>groups[i].has(n))){for(const n of groups[i])names.add(n);groups.splice(i,1);}
   groups.push(names);
@@ -96,5 +97,7 @@ export async function openDiscussion({stateDir,python,knowledge,generate,api,sto
   validate(output,combined);d.pages=combined;d.turns.push({messageId,question:command.question,judgment:command.judgment,answer:output});d.ended=false;state.active=d.id;
   return persist({id:d.id,text:`【Wiki】讨论 ${d.id}\n\n${output}${command.judgment?'\n\n用户判断（原话）：\n'+command.judgment:''}\n\n来源：\n${combined.filter(p=>citations(output).some(c=>c[1]===p.id)).map(p=>`${p.title??p.id} ${p.citation}\n小婕 wk 阅读：${p.id} ${p.start}`).join('\n')}\n\n保存：小婕 wk 保存结论：${d.id}\n结束：小婕 wk 结束讨论：${d.id}`});
  }
- let ingress=Promise.resolve();return {execute(...args){const next=ingress.then(()=>withLock(args[0],()=>execute(...args)));ingress=next.catch(()=>{});return next;}};
+ let ingress=Promise.resolve();return {
+  async resolveReply(scope,text){const state=await optionalJSON(join(directory,scopeKey(scope)+'.json'));const id=text.match(/^【Wiki】讨论 (D-[a-f0-9]{16})/u)?.[1];if(!id||!state?.discussions[id])return null;return Object.values(state.messages).some(r=>r.id===id&&r.result?.text&&comparableText(r.result.text)===comparableText(text))?id:null;},
+  execute(...args){const next=ingress.then(()=>withLock(args[0],()=>execute(...args)));ingress=next.catch(()=>{});return next;}};
 }

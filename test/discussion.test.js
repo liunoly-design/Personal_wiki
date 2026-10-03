@@ -134,3 +134,37 @@ test('failed preconditions can be retried after adding evidence; implicit follow
  f.fail=true;await assert.rejects(f.send('om_failed','小婕 wk 讨论：继续'));f.fail=false;const b=await f.send('om_b','小婕 wk 新讨论：另一话题');assert.equal((await f.send('om_continue','小婕 wk 讨论：继续')).id,b.id);
  }finally{await f.close();}
 });
+test('actual parent relation resumes the matched Wiki discussion; forged, foreign or general replies are not implicitly routed',async()=>{
+ const f=await fixture();try{
+ f.options.hostConfig.channels={feishu:{appId:'cli_test'}};await f.restart();const d=await f.send('om_start','小婕 wk 讨论：团队');
+ const get=f.options.feishu.getMessage;let parentText=d.text;let app='cli_test';let chat='oc_test';
+ f.options.feishu.getMessage=async id=>id==='om_parent'?{message_id:id,chat_id:chat,msg_type:'post',sender:{id:app,id_type:'app_id',sender_type:'app'},body:{content:JSON.stringify({content_v2:[[{tag:'md',text:parentText}]]})}}:{...await get(id),parent_id:'om_parent'};
+ f.messages.om_follow='上海如何核算设备成本？';assert.equal((await f.runtime.acceptReply({...scope,MessageSid:'om_follow'})).id,d.id);
+ parentText='普通模型回答，与Wiki无关';f.messages.om_normal='继续';assert.equal(await f.runtime.acceptReply({...scope,MessageSid:'om_normal'}),null);
+ parentText=d.text+'伪造段落';f.messages.om_fake='继续';assert.equal(await f.runtime.acceptReply({...scope,MessageSid:'om_fake'}),null);
+ parentText=d.text;chat='oc_other';f.messages.om_foreign='继续';assert.equal(await f.runtime.acceptReply({...scope,MessageSid:'om_foreign'}),null);
+ chat='oc_test';app='cli_another';f.messages.om_app='继续';assert.equal(await f.runtime.acceptReply({...scope,MessageSid:'om_app'}),null);
+ }finally{await f.close();}
+});
+test('reply-save archives the exact rich response without model rewriting, verifies read/search and rejects an unbound save',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.options.hostConfig.channels={feishu:{appId:'cli_test'}};await f.restart();
+ const text='# 成本分析\n\n上海规则需核验。\n\n```text\n成本 = 试剂 + 设备\n```';const parent={message_id:'om_parent',chat_id:'oc_test',msg_type:'post',create_time:'1000',sender:{id:'cli_test',id_type:'app_id',sender_type:'app'},body:{content:JSON.stringify({content_v2:[[{tag:'md',text}]]})}};
+ const get=f.options.feishu.getMessage;let hasParent=true;f.options.feishu.getMessage=async id=>id==='om_parent'?parent:{...await get(id),...(hasParent?{parent_id:'om_parent'}:{})};
+ f.api.read=async p=>readFile(join(f.config.vault,p),'utf8');f.api.search=async()=>({results:(await readdir(join(f.config.vault,'wiki/topics')).catch(()=>[])).map(n=>({path:'wiki/topics/'+n}))});
+ f.messages.om_save='小婕 wk 保存';const calls=f.calls;const saved=await f.runtime.knowledgeMessage(scope,'om_save','discuss');assert.equal(f.calls,calls);assert.match(saved.text,/原样保存/);assert.match(saved.text,/未经 Wiki/);
+ const file=(await readdir(join(f.config.vault,'wiki/topics')))[0];const body=await readFile(join(f.config.vault,'wiki/topics',file),'utf8');assert.ok(body.includes(text));
+ const assets=await readdir(join(f.config.vault,'raw/assets'));const original=JSON.parse(await readFile(join(f.config.vault,'raw/assets',assets[0],'feishu-message.json'),'utf8'));assert.equal(original.body.content,parent.body.content);
+ f.messages.om_save2='小婕 wk 保存';await f.runtime.knowledgeMessage(scope,'om_save2','discuss');assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
+ hasParent=false;f.messages.om_no='小婕 wk 保存';await assert.rejects(f.runtime.knowledgeMessage(scope,'om_no','discuss'),/回复要保存/);
+ }finally{await f.close();}
+});
+test('reply-save verification outage survives restart and new message retry without altering original reply',async()=>{
+ const f=await fixture();try{
+ await mkdir(f.config.vault,{recursive:true});f.options.hostConfig.channels={feishu:{appId:'cli_test'}};await f.restart();
+ const parent={message_id:'om_parent',chat_id:'oc_test',msg_type:'text',sender:{id:'cli_test',id_type:'app_id',sender_type:'app'},body:{content:JSON.stringify({text:'原模型回复\n不是已核验政策'})}};
+ const get=f.options.feishu.getMessage;f.options.feishu.getMessage=async id=>id==='om_parent'?parent:{...await get(id),parent_id:'om_parent'};
+ f.api.read=async()=>{throw Error('API offline');};f.messages.om_save1='小婕 wk 保存';await assert.rejects(f.runtime.knowledgeMessage(scope,'om_save1','discuss'),/offline/);
+ await f.restart();f.api.read=async p=>readFile(join(f.config.vault,p),'utf8');f.api.search=async()=>({results:(await readdir(join(f.config.vault,'wiki/topics'))).map(n=>({path:'wiki/topics/'+n}))});f.messages.om_save2='小婕 wk 保存';const r=await f.runtime.knowledgeMessage(scope,'om_save2','discuss');assert.match(r.text,/核验/);assert.equal((await readdir(join(f.config.vault,'wiki/topics'))).length,1);
+ }finally{await f.close();}
+});

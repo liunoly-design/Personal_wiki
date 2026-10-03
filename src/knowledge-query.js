@@ -19,7 +19,8 @@ export async function openKnowledgeQuery({stateDir,api,generate,notes=async()=>[
   if(!selected.length)throw Error('Line exceeds reading limit');
   const end=start+selected.length-1;
   const originalPaths=links.filter(p=>p.startsWith('raw/sources/'));const sourceId=lines.slice(0,30).find(l=>/^source_id:/.test(l))?.replace(/^source_id:\s*/,'').replaceAll('"','');
-  return {...item,originals:originalPaths,sourceId,sourceIdentity:originalPaths[0]??(sourceId?'source:'+sourceId:undefined),...readingContext(lines,start),title:item.title??lines.find(l=>/^#\s+/.test(l))?.replace(/^#\s+/,''),start,end,totalLines:lines.length,partial:start>1||end<lines.length,links:[...new Set(links)],content:selected.join('\n'),citation:`[${item.id} L${start}-L${end}]`};
+  const modelReply=/^(?:raw\/sources\/model-reply-|wiki\/topics\/saved-reply-)/u.test(item.path);
+  return {...item,...(modelReply?{kind:'已保存模型回复（未经Wiki来源核验，不属于作者证据）',modelReply:true}:{}),originals:originalPaths,sourceId,sourceIdentity:originalPaths[0]??(sourceId?'source:'+sourceId:undefined),...readingContext(lines,start),title:item.title??lines.find(l=>/^#\s+/.test(l))?.replace(/^#\s+/,''),start,end,totalLines:lines.length,partial:start>1||end<lines.length,links:[...new Set(links)],content:selected.join('\n'),citation:`[${item.id} L${start}-L${end}]`};
  }
  function render(p){return `${p.citation} ${p.path}\n类型：${p.kind}；${p.partial?'部分读取':'全文已读取'}；共${p.totalLines}行${p.end<p.totalLines?`${p.end<p.totalLines?`；继续：小婕 wk 阅读：${p.id} ${p.end+1}`:''}${p.start>1?`；从头：小婕 wk 阅读：${p.id} 1`:''}`:''}\n${p.content.split('\n').map((l,i)=>`L${p.start+i}: ${l}`).join('\n')}`;}
  return {

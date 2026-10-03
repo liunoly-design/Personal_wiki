@@ -116,6 +116,26 @@ def finalize(root, request):
 
 
 
+def publish_quoted_reply(root, request):
+    key, message, text = request.get('key', ''), request.get('message'), request.get('text')
+    if not re.fullmatch('[a-f0-9]{64}', key) or not isinstance(message, dict) or not isinstance(text, str) or not text.strip() or len(text.encode()) > 100000:
+        raise ValueError('Invalid quoted reply')
+    message_id = message.get('message_id', '')
+    if not re.fullmatch(r'om_[\w-]+', message_id):
+        raise ValueError('Invalid quoted message ID')
+    raw_json = f'raw/assets/{key[:20]}/feishu-message.json'
+    raw_text = f'raw/sources/model-reply-{key[:16]}.md'
+    path = f'wiki/topics/saved-reply-{key[:16]}.md'
+    record = encode(message)
+    # Explicit archival of a model response; never label it as author evidence.
+    body = f'---\ntype: saved-model-reply\nverified: false\n---\n# 保存的模型回复\n\n> 这是小婕模型回复的原样保存。政策、数字和建议未经 Wiki 来源核验，不属于原作者证据。\n\n## 原回复正文\n\n{text}\n'
+    body += f'\n\n## 保存来源\n\n飞书消息：{message_id}；发送时间戳：{message.get("create_time", "unknown")}\n\n[原回复正文](../../{raw_text}) · [原始消息记录](../../{raw_json})\n'
+    root.immutable(raw_json, record)
+    root.immutable(raw_text, text.encode())
+    root.immutable(path, body.encode())
+    return dict(path=path, pages=[dict(path=path, hash=sha(body.encode())), dict(path=raw_text, hash=sha(text.encode()))])
+
+
 def publish_discussion(root, request):
     key = request.get('key', '')
     if not re.fullmatch('[a-f0-9]{64}', key):
@@ -171,6 +191,9 @@ if __name__ == '__main__':
                 intent = json.loads(raw)
                 content = root.optional(intent['path'])
                 result = dict(safeToAbandon=(content is not None and sha(content) != intent['outputHash']) or (content is None and intent['previousHash'] is None))
+        elif operation == 'quoted-reply':
+            lock = root.lock()
+            result = publish_quoted_reply(root, request)
         elif operation in ('conclusion', 'synthesis'):
             lock = root.lock()
             result = publish_discussion(root, request)
