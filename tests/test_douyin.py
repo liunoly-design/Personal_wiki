@@ -121,3 +121,40 @@ class DouyinMediaTests(unittest.TestCase):
             (root/'cleanup.json').write_text(json.dumps({'files':[entry],'deleted':[]}))
             with self.assertRaisesRegex(ValueError,'symlink'):clean_verified(root,True)
             self.assertTrue((root/'download.mp4').is_symlink())
+
+    def test_public_single_video_metadata_keeps_source_and_download_url_distinct(self):
+        from scripts.douyin_video import metadata
+        import json
+        vid='7691977131957472558';detail={'aweme_id':vid,'desc':'平台标题','author':{'nickname':'作者'},'video':{'duration':3000,'width':1920,'height':1080,'play_addr':{'url_list':['https://media.douyinvod.com/video.mp4'],'data_size':1000}}}
+        def public_page(url):return ('https://www.iesdouyin.com/share/video/'+vid+'/', '<script>window._ROUTER_DATA = '+json.dumps({'detail':detail})+'</script>')
+        result=metadata('https://v.douyin.com/Example/',fetch=public_page)
+        self.assertEqual(result['url'],'https://www.douyin.com/video/'+vid)
+        self.assertEqual(result['media_url'],'https://media.douyinvod.com/video.mp4')
+        self.assertEqual(result['duration'],3)
+
+    def test_expired_stream_refreshes_only_same_verified_video_without_replaying_download(self):
+        from scripts.douyin_video import acquire_media
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);meta={'id':'7691977131957472558','url':'https://www.douyin.com/video/7691977131957472558','media_url':'https://media.douyinvod.com/expired.mp4','duration':1,'width':320,'height':240,'expected_size':1000};calls=[]
+            def expired(url,*args,**kwargs):calls.append(url);raise OSError('HTTP 410')
+            fresh={**meta,'media_url':'https://media.douyinvod.com/refreshed.mp4'}
+            with self.assertRaisesRegex(OSError,'address refreshed'):acquire_media(meta['url'],root,'compressed',meta,fetch_metadata=lambda _:fresh,download_stream=expired)
+            self.assertEqual(len(calls),1)
+            self.assertEqual(json.loads((root/'metadata.json').read_text())['media_url'],fresh['media_url'])
+            self.assertEqual(json.loads((root/'download-state.json').read_text())['attempts'],1)
+
+    def test_interrupted_publication_link_reconciles_only_archive_inode(self):
+        from scripts.publish_bundle import publish
+        import os
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);vault=root/'vault';package=root/'package';vault.mkdir();package.mkdir()
+            (package/'video.mp4').write_bytes(b'fixture-video');(package/'audio.m4a').write_bytes(b'fixture-audio')
+            request={'operation':'douyin-media','vault':str(vault),'directory':str(package),'videoId':'7691977131957472558','mode':'compressed','media':{'version':'fixture'}}
+            first=publish(request);archive=vault/'raw/assets/douyin-7691977131957472558/compressed/video.mp4'
+            os.link(archive,package/'.shared-video.mp4')
+            self.assertEqual(publish(request),first)
+            self.assertFalse((package/'.shared-video.mp4').exists())
+            (package/'.shared-video.mp4').write_bytes(b'other-owner')
+            with self.assertRaisesRegex(ValueError,'identity mismatch'):publish(request)
+            self.assertEqual(archive.read_bytes(),b'fixture-video')

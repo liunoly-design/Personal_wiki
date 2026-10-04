@@ -12,8 +12,9 @@ export async function acquireQueueLease(directory,python){
  return async()=>{await new Promise(resolve=>{child.once('exit',resolve);child.stdin.end();});};
 }
 function waitingReason(message,attempts){
+ if(/ASR login required/iu.test(message))return 'waiting_asr_auth';
  if(/ASR unknown cloud result/iu.test(message))return 'waiting_unknown';
- if(/ASR backend unavailable|ASR backend version changed|ASR empty voiced|ASR suspected truncation|ASR retry budget exhausted/iu.test(message))return 'waiting_asr';
+ if(/ASR backend unavailable|ASR backend version changed|ASR empty voiced|ASR suspected truncation|ASR retry budget exhausted|metadata retry budget exhausted|Download retry budget exhausted/iu.test(message))return 'waiting_asr';
  if(/Private or non-public|DNS resolution|Non-public DoH/iu.test(message))return 'waiting_network';
  if(/Unsupported source URL/iu.test(message))return 'waiting_input';
  if(/402|quota|capacity|额度/iu.test(message))return 'waiting_capacity';

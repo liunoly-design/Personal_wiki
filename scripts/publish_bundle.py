@@ -2,7 +2,10 @@
 """Publish staged results without replacing any existing user content."""
 import json, os, re, sys, posixpath
 from pathlib import Path
-from protected_store import Root, encode, sha, verify, rewrite_attachments, rewrite_prose
+try:
+    from .protected_store import Root, encode, sha, verify, rewrite_attachments, rewrite_prose
+except ImportError:
+    from protected_store import Root, encode, sha, verify, rewrite_attachments, rewrite_prose
 
 
 def rewrite_links(body, path, mapping):
@@ -38,8 +41,14 @@ def publish(request):
                 try:
                     if sha(origin.read(name))!=assets[base+'/'+name]:raise ValueError('Concurrent work media changed')
                     try:
-                        os.link(archive_name,temporary,src_dir_fd=archive_fd,dst_dir_fd=work_fd,follow_symlinks=False)
-                        os.replace(temporary,work_name,src_dir_fd=work_fd,dst_dir_fd=work_fd);os.fsync(work_fd)
+                        try:os.link(archive_name,temporary,src_dir_fd=archive_fd,dst_dir_fd=work_fd,follow_symlinks=False)
+                        except FileExistsError:
+                            old=os.stat(temporary,dir_fd=work_fd,follow_symlinks=False);archived=os.stat(archive_name,dir_fd=archive_fd,follow_symlinks=False)
+                            if (old.st_dev,old.st_ino)!=(archived.st_dev,archived.st_ino) or sha(origin.read(temporary))!=assets[base+'/'+name]:raise ValueError('Interrupted media link identity mismatch')
+                        current=os.stat(work_name,dir_fd=work_fd,follow_symlinks=False);archived=os.stat(archive_name,dir_fd=archive_fd,follow_symlinks=False)
+                        if (current.st_dev,current.st_ino)==(archived.st_dev,archived.st_ino):os.unlink(temporary,dir_fd=work_fd)
+                        else:os.replace(temporary,work_name,src_dir_fd=work_fd,dst_dir_fd=work_fd)
+                        os.fsync(work_fd)
                     except OSError as error:
                         if error.errno!=18:raise
                 finally:

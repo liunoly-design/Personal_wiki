@@ -86,13 +86,13 @@ def fetch_page(url):
     raise ValueError('Douyin redirect limit exceeded')
 
 
-def metadata(url):
-    url=source_url(url);final,html=fetch_page(url)
+def metadata(url,fetch=fetch_page):
+    url=source_url(url);final,html=fetch(url)
     match=re.search(r'/(?:share/)?video/([0-9]{10,24})',urlsplit(final).path)
     if not match:raise ValueError('Unsupported source URL: redirect is not a single video')
     vid=match[1]
     # Public mobile HTML embeds the same platform aweme data; no signature/cookie bypass.
-    _,html=fetch_page('https://www.iesdouyin.com/share/video/'+vid+'/')
+    _,html=fetch('https://www.iesdouyin.com/share/video/'+vid+'/')
     candidates=[]
     for pattern in [r'window\._ROUTER_DATA\s*=\s*(\{.*?\})\s*</script>',r'<script[^>]*id="RENDER_DATA"[^>]*>(.*?)</script>']:
         m=re.search(pattern,html,re.S)
@@ -124,7 +124,7 @@ def metadata(url):
     chosen=max(formats,key=lambda f:(min(f['width'],f['height']),f['bitrate']))
     duration=video.get('duration',detail.get('duration'))
     if not isinstance(duration,(int,float)) or duration<=0:raise ValueError('unsupported media: duration unavailable')
-    return dict(id=vid,url='https://www.douyin.com/video/'+vid,title=detail.get('desc') or 'Douyin '+vid,author=detail.get('author',{}).get('nickname',''),duration=duration/1000,**chosen)
+    return dict(id=vid,url='https://www.douyin.com/video/'+vid,title=detail.get('desc') or 'Douyin '+vid,author=detail.get('author',{}).get('nickname',''),duration=duration/1000,media_url=chosen['url'],**{k:v for k,v in chosen.items() if k!='url'})
 
 
 def ffmpeg():
@@ -199,15 +199,29 @@ def prepare_media(root,source,mode):
     return result
 
 
-def acquire_media(url,root,mode,meta=None,approved=False):
+def acquire_media(url,root,mode,meta=None,approved=False,fetch_metadata=metadata,download_stream=download):
     root=Path(root);root.mkdir(parents=True,exist_ok=True)
-    meta=meta or load(root/'metadata.json') or metadata(url)
+    saved=load(root/'metadata.json')
+    meta=saved or meta or fetch_metadata(url)
     atomic_json(root/'metadata.json',meta)
     if (meta['duration']>1800 or (meta.get('expected_size') or 0)>=LIMIT) and not approved:raise ValueError('Video confirmation required: exceeds 30 minutes or 1 GB')
     estimate=meta.get('expected_size') or LIMIT
     if shutil.disk_usage(root).free<estimate*3+meta['duration']*32000:raise ValueError('Insufficient disk space; materials retained')
     source=root/'download.mp4'
-    if not source.exists():download(meta['url'],source,approved=approved,validate_url=lambda u:check_url(u,True),resolve_addresses=douyin_addresses)
+    if not source.exists():
+        state=load(root/'download-state.json') or dict(attempts=0,refreshes=0)
+        if state['attempts']>=5:raise ValueError('Download retry budget exhausted; materials retained')
+        state['attempts']+=1;atomic_json(root/'download-state.json',state)
+        try:download_stream(meta['media_url'],source,approved=approved,validate_url=lambda u:check_url(u,True),resolve_addresses=douyin_addresses)
+        except (ValueError,OSError) as error:
+            if re.search(r'HTTP (?:401|403|404|410)',str(error)):
+                if state['refreshes']>=5:raise ValueError('Douyin metadata retry budget exhausted')
+                state['refreshes']+=1;atomic_json(root/'download-state.json',state)
+                fresh=fetch_metadata(url)
+                if fresh['id']!=meta['id'] or any(fresh.get(k)!=meta.get(k) for k in ('duration','width','height')):raise ValueError('Refreshed media identity/format changed; explicit new version required')
+                atomic_json(root/'metadata.json',fresh)
+                raise OSError('Media address refreshed under verified video identity; continue bounded retry')
+            raise
     result=prepare_media(root,source,mode)
     if result['source']['duration']>1800 and not approved:raise ValueError('Video confirmation required: actual duration exceeds 30 minutes')
     if abs(result['source']['duration']-meta['duration'])>1:raise ValueError('Downloaded source duration mismatch')
@@ -271,6 +285,7 @@ def codex_asr(binary,path):
         r=subprocess.run([binary,str(path),'--language','zh','--json'],capture_output=True,text=True,timeout=330)
     except subprocess.TimeoutExpired:raise ASRFailure('ASR unknown cloud result: timeout',True)
     if r.returncode:
+        if any(v in r.stderr.lower() for v in ('codex auth','chatgpt access token','auth mode')):raise ASRFailure('ASR login required: local ChatGPT authentication unavailable')
         # Never propagate remote bodies, auth data or arbitrary CLI stderr into logs.
         status=re.search(r'(?:HTTP|status)[^0-9]{0,15}([45][0-9]{2})',r.stderr,re.I)
         code=status[1] if status else None
@@ -340,10 +355,11 @@ def transcribe_audio(root,binary=None,backend=None,recovery=False):
             job.update(status='in_flight',input_hash=input_hash,attempts=job['attempts']+1,recovery_id=recovery_id or job.get('recovery_id'));atomic_json(root/'asr-state.json',state)
             try:
                 value={'text':'','silence':True} if silent else (backend(path) if backend else codex_asr(binary,path))
+                raw=dict(segment=segment,config=config,input_hash=input_hash,response=value)
+                atomic_json(package/'responses'/f'attempt-{idx}-{job["attempts"]}.json',raw)
                 if not isinstance(value.get('text'),str) or (not silent and not value['text'].strip()):raise ASRFailure('ASR empty voiced segment; review required')
                 if not silent and voiced_seconds>10 and len(re.sub(r'\s','',value['text']))<voiced_seconds*.3:raise ASRFailure('ASR suspected truncation; too little text for voiced duration')
                 if not silent and (value.get('truncated') or value['text'].rstrip().endswith(('…','...'))):raise ASRFailure('ASR suspected truncation; review required')
-                raw=dict(segment=segment,config=config,input_hash=input_hash,response=value)
                 atomic_json(response,raw)
                 job.update(status='complete',response_hash=sha(response));atomic_json(root/'asr-state.json',state)
             except ASRFailure as e:
@@ -376,6 +392,8 @@ def main(request):
     raise ValueError('Unsupported operation')
 
 if __name__=='__main__':
-    try:print(json.dumps(main(json.load(sys.stdin)),ensure_ascii=False))
+    request=json.load(sys.stdin)
+    try:print(json.dumps(main(request),ensure_ascii=False))
     except Exception as e:
-        print(json.dumps(dict(error=str(e)),ensure_ascii=False));sys.exit(1)
+        pending=load(Path(request['root'])/'metadata.json') if request.get('operation')=='media' else None
+        print(json.dumps(dict(error=str(e),pendingMetadata=pending),ensure_ascii=False));sys.exit(1)

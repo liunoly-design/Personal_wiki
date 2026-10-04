@@ -30,6 +30,10 @@ test('one video publishes media and full transcript through canonical collection
   assert.equal(r.status,'complete');assert.equal(r.video.mode,'compressed');assert.match(await readFile(r.source,'utf8'),/末尾唯一短语凤凰验收/);
   assert.equal(r.video.cleanup.bytes,100);assert.equal(ops.at(-1),'cleanup');
   const prior=modelCalls;await collectDouyin({...input,workspace:join(root,'work2'),url:'https://www.douyin.com/video/7691977131957472558'},collectCanonical);assert.equal(modelCalls,prior);
+  const noteA=await collectDouyin({...input,background:'第一份个人背景',requestId:'a'.repeat(64)},collectCanonical);
+  const noteB=await collectDouyin({...input,background:'第二份个人背景',requestId:'b'.repeat(64)},collectCanonical);
+  assert.notEqual(noteA.userRecord,noteB.userRecord);assert.match(await readFile(noteB.userRecord,'utf8'),/第二份个人背景/);
+  const bare=await collectDouyin(input,collectCanonical);assert.equal(bare.userRecord,undefined);assert.equal(modelCalls,prior);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
@@ -63,4 +67,10 @@ test('authenticated record ingress freezes original mode and never accepts a for
  const message={message_id:'om_video',chat_id:'c',sender:{id:'s',id_type:'open_id',sender_type:'user'},body:{content:JSON.stringify({text:'小婕 wk 记录：原画质 https://v.douyin.com/Example/'})}};
  const runtime=await openCanonicalRuntime({config:{accountId:'a',allowedSenderIds:['s'],allowedConversationIds:['c'],vault:join(root,'v'),stateDir:join(root,'state'),python:'/usr/bin/python3'},hostConfig:{},flash:{},feishu:{getMessage:async()=>message,reply:async()=>({message_id:'om_reply',chat_id:'c'})},collect:async args=>{seen.push(args);throw Error('ASR unknown cloud result: timeout');}});
  try{const r=await runtime.acceptMessage(scope,'om_video');await runtime.processJobs();assert.equal(seen[0].videoMode,'original');assert.equal((await runtime.status(scope,r.jobId)).status,'waiting_unknown');assert.equal((await runtime.acceptMessage(scope,'om_video')).duplicate,true);message.sender.id='forged';await assert.rejects(runtime.acceptMessage(scope,'om_video'),/Source mismatch/);}finally{await runtime.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('restored Codex authentication resumes via explicit continue without authorizing browser cookies',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'douyin-auth-'));const scope={Provider:'feishu',AccountId:'a',SenderId:'s',NativeChannelId:'c'};let text='小婕 wk 记录：https://v.douyin.com/Example/';let restored=false,recovery;
+ const runtime=await openCanonicalRuntime({config:{accountId:'a',allowedSenderIds:['s'],allowedConversationIds:['c'],vault:join(root,'v'),stateDir:join(root,'state'),python:'/usr/bin/python3'},hostConfig:{},flash:{},feishu:{getMessage:async id=>({message_id:id,chat_id:'c',sender:{id:'s',id_type:'open_id',sender_type:'user'},body:{content:JSON.stringify({text})}}),reply:async()=>({message_id:'om_reply',chat_id:'c'})},collect:async args=>{await args.onStage('video_audio_archived',{video:{mode:'compressed',video:'complete',audio:'complete',transcript:'pending',knowledge:'pending'}});if(!restored)throw Error('ASR login required: HTTP 401');recovery=args.videoRecovery;assert.equal(args.browserProfile,undefined);return {status:'complete',source:'synthetic-source'};}});
+ try{const accepted=await runtime.acceptMessage(scope,'om_record');await runtime.processJobs();assert.equal((await runtime.status(scope,accepted.jobId)).status,'waiting_asr_auth');restored=true;text='小婕 wk 继续：'+accepted.jobId;await runtime.acceptMessage(scope,'om_continue');await runtime.processJobs();assert.equal((await runtime.status(scope,accepted.jobId)).status,'done');assert.equal(recovery.messageId,'om_continue');}finally{await runtime.close();await rm(root,{recursive:true,force:true});}
 });
