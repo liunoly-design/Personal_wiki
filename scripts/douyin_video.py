@@ -155,7 +155,9 @@ def media_probe(path,video=True):
     return info
 
 
-def load(path):return json.loads(path.read_text()) if path.exists() else None
+def load(path):
+    if path.is_symlink():raise ValueError('Symlink state file rejected')
+    return json.loads(path.read_text()) if path.exists() else None
 
 
 def freeze_file(root,path):
@@ -166,7 +168,7 @@ def freeze_file(root,path):
 
 
 def prepare_media(root,source,mode):
-    root=Path(root);source=Path(source);package=root/'package';package.mkdir(exist_ok=True)
+    root=Path(root);source=Path(source);safe_destination(root,str(source.relative_to(root)));package=safe_destination(root,'package/video.mp4').parent;package.mkdir(exist_ok=True)
     prior=load(root/'media.json')
     if prior:
         if prior['mode']!=mode or prior['version']!=VERSION:raise ValueError('Media config changed; create a new version')
@@ -178,16 +180,16 @@ def prepare_media(root,source,mode):
     info=media_probe(source)
     if min(info['width'],info['height'])>1080:raise ValueError('Video exceeds 1080p')
     if shutil.disk_usage(root).free<max(64*1024*1024,info['bytes']*2+info['duration']*32000):raise ValueError('Insufficient disk space; materials retained')
-    audio=package/'audio.m4a';video=package/'video.mp4'
+    audio=safe_destination(root,'package/audio.m4a');video=safe_destination(root,'package/video.mp4')
     # Extract complete audio from the verified source before any video conversion.
     if not audio.exists():
-        tmp=root/'audio.tmp.m4a';run_media(['-v','error','-i',str(source),'-vn','-c:a','aac','-b:a','128k',str(tmp),'-y']);tmp.replace(audio)
+        tmp=safe_destination(root,'audio.tmp.m4a');run_media(['-v','error','-i',str(source),'-vn','-c:a','aac','-b:a','128k',str(tmp),'-y']);tmp.replace(audio)
     a=media_probe(audio,False)
     if abs(a['duration']-info['duration'])>.25:raise ValueError('Incomplete audio duration')
     if not video.exists():
         if mode=='original':shutil.copyfile(source,video)
         else:
-            tmp=root/'video.tmp.mp4'
+            tmp=safe_destination(root,'video.tmp.mp4')
             scale="scale=w='trunc(iw*min(1,720/min(iw,ih))/2)*2':h='trunc(ih*min(1,720/min(iw,ih))/2)*2'"
             run_media(['-v','error','-i',str(source),'-vf',scale,'-c:v','libx264','-crf','28','-preset','medium','-c:a','aac','-b:a','128k','-movflags','+faststart',str(tmp),'-y']);tmp.replace(video)
     v=media_probe(video)
@@ -201,13 +203,15 @@ def prepare_media(root,source,mode):
 
 def acquire_media(url,root,mode,meta=None,approved=False,fetch_metadata=metadata,download_stream=download):
     root=Path(root);root.mkdir(parents=True,exist_ok=True)
+    requested=meta
     saved=load(root/'metadata.json')
+    if approved and saved and any((requested or {}).get(k)!=saved.get(k) for k in ('id','url','duration','width','height','expected_size')):approved=False
     meta=saved or meta or fetch_metadata(url)
     atomic_json(root/'metadata.json',meta)
     if (meta['duration']>1800 or (meta.get('expected_size') or 0)>=LIMIT) and not approved:raise ValueError('Video confirmation required: exceeds 30 minutes or 1 GB')
     estimate=meta.get('expected_size') or LIMIT
     if shutil.disk_usage(root).free<estimate*3+meta['duration']*32000:raise ValueError('Insufficient disk space; materials retained')
-    source=root/'download.mp4'
+    source=safe_destination(root,'download.mp4')
     if not source.exists():
         state=load(root/'download-state.json') or dict(attempts=0,refreshes=0)
         if state['attempts']>=5:raise ValueError('Download retry budget exhausted; materials retained')
@@ -373,7 +377,7 @@ def transcribe_audio(root,binary=None,backend=None,recovery=False):
         if seg['start']>cursor+.01 or seg['end']<=seg['start']:raise ValueError('Transcript time coverage gap')
         cursor=seg['end']
     if abs(cursor-info['duration'])>.05:raise ValueError('Transcript tail missing')
-    transcript=package/'transcript.md';body='# 原始机器转录全文\n\n> 未经人工校订；时间锚为分段起点，不是词级对齐。\n\n'+'\n\n'.join(texts)+'\n'
+    transcript=safe_destination(root,'package/transcript.md');body='# 原始机器转录全文\n\n> 未经人工校订；时间锚为分段起点，不是词级对齐。\n\n'+'\n\n'.join(texts)+'\n'
     if transcript.exists() and transcript.read_text()!=body:raise ValueError('Existing machine transcript protected')
     transcript.write_text(body)
     shutil.copyfile(root/'segments.json',package/'segments.json')

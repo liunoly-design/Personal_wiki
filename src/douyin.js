@@ -16,6 +16,10 @@ export async function videoPipeline(request,{python,signal}){
  });
 }
 async function safeDirectory(path){await mkdir(path,{recursive:true,mode:0o700});for(let p=path;p!==dirname(p);p=dirname(p)){if((await lstat(p)).isSymbolicLink())throw Error('Symlink video state rejected');}}
+async function freezeCopy(src,dest){
+ if(!(await lstat(src)).isFile())throw Error('Video snapshot must contain regular files');
+ try{await copyFile(src,dest,1);}catch(error){if(error.code!=='EEXIST')throw error;if(!(await lstat(dest)).isFile()||hash(await readFile(src))!==hash(await readFile(dest)))throw Error('Frozen video snapshot changed; retain human content');}
+}
 async function verifySearch(result,{api,vault}){
  const path=relative(vault,result.source);const body=await api.read(path);
  const probe=result.video?.searchProbe;
@@ -48,7 +52,7 @@ export async function collectDouyin(options,collect){
    const approval=options.mediaApprovals?.[asset.id];const approved=approval?.fingerprint===asset.fingerprint;
    const pending=(m=meta)=>({status:'partial',resumableMedia:true,video:{id:meta.id,mode,video:'waiting_confirmation',audio:'pending',transcript:'pending',knowledge:'pending'},missingAssets:[assetFor(m)]});
    if(!approved&&(meta.duration>1800||(meta.expected_size??0)>=1_000_000_000))return pending();
-   let media;try{media=await pipeline({operation:'media',root,url:meta.url,mode,metadata:meta,approved});}catch(error){if(/confirmation required/iu.test(error.message)){const fresh=error.pendingMetadata;if(fresh){if(fresh.id!==meta.id||fresh.url!==meta.url)throw Error('Refreshed video identity mismatch');meta=fresh;await saveJSON(alias,meta);}return pending();}throw error;}
+   let media;try{media=await pipeline({operation:'media',root,url:meta.url,mode,metadata:meta,approved});}catch(error){const fresh=error.pendingMetadata;if(fresh){if(fresh.id!==meta.id||fresh.url!==meta.url)throw Error('Refreshed video identity mismatch');meta=fresh;await saveJSON(alias,meta);}if(/confirmation required/iu.test(error.message))return pending();throw error;}
    const oldMedia=await optionalJSON(join(root,'media-publication.json'));
    const mediaPublication=oldMedia??await publishBundle({operation:'douyin-media',vault,videoId:meta.id,mode,directory:join(root,'package'),media:{...media,metadata:media.metadata??meta}},{python,signal});
    await saveJSON(join(root,'media-publication.json'),mediaPublication);await verifyPublication(mediaPublication,{vault,api});
@@ -62,7 +66,7 @@ export async function collectDouyin(options,collect){
     const transcript=await pipeline({operation:'transcribe',root,binary:options.asrBinary,recovery:options.videoRecovery??false});
     const body=await readFile(transcript.transcript,'utf8');
     const snapshot=join(root,'snapshot');await safeDirectory(snapshot);
-    for(const name of await readdir(join(root,'package'))){if(['video.mp4','audio.m4a'].includes(name))continue;const src=join(root,'package',name);if((await lstat(src)).isSymbolicLink())throw Error('Video snapshot symlink rejected');if((await lstat(src)).isDirectory()){await safeDirectory(join(snapshot,name));for(const child of await readdir(src))await copyFile(join(src,child),join(snapshot,name,child));}else await copyFile(src,join(snapshot,name));}
+    for(const name of await readdir(join(root,'package'))){if(['video.mp4','audio.m4a'].includes(name))continue;const src=join(root,'package',name);if((await lstat(src)).isSymbolicLink())throw Error('Video snapshot symlink rejected');if((await lstat(src)).isDirectory()){await safeDirectory(join(snapshot,name));for(const child of await readdir(src))await freezeCopy(join(src,child),join(snapshot,name,child));}else await freezeCopy(src,join(snapshot,name));}
     const assetBase='../assets/douyin-'+meta.id+'/'+mode;
     const text=`# 抖音视频资料\n\n平台标题/作者说明（不是转录）：${meta.title}\n\n平台作者：${meta.author}\n\n来源：${meta.url}\n\n保存模式：${mode}；实际尺寸：${media.video.width}×${media.video.height}\n\n[${mode==='compressed'?'压缩归档视频':'原画质下载流'}](${assetBase}/video.mp4)\n\n[独立完整音频](${assetBase}/audio.m4a)\n\n[原始机器稿](transcript.md)\n\n${body}`;
     const article=join(snapshot,'article.md');try{await writeFile(article,text,{flag:'wx'});}catch(e){if(e.code!=='EEXIST')throw e;if(await readFile(article,'utf8')!==text)throw Error('Frozen video snapshot changed');}

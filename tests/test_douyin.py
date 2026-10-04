@@ -158,3 +158,14 @@ class DouyinMediaTests(unittest.TestCase):
             (package/'.shared-video.mp4').write_bytes(b'other-owner')
             with self.assertRaisesRegex(ValueError,'identity mismatch'):publish(request)
             self.assertEqual(archive.read_bytes(),b'fixture-video')
+
+    def test_approved_old_size_never_authorizes_larger_refreshed_metadata(self):
+        from scripts.douyin_video import acquire_media
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);old={'id':'7691977131957472558','url':'https://www.douyin.com/video/7691977131957472558','media_url':'https://media.douyinvod.com/old.mp4','duration':1,'width':320,'height':240,'expected_size':1_100_000_000}
+            fresh={**old,'expected_size':2_200_000_000,'media_url':'https://media.douyinvod.com/new.mp4'};(root/'metadata.json').write_text(json.dumps(fresh))
+            calls=[]
+            def download(*args,**kwargs):calls.append(kwargs.get('approved'));raise OSError('must not download using stale approval')
+            with self.assertRaisesRegex(ValueError,'confirmation required'):acquire_media(old['url'],root,'compressed',old,approved=True,download_stream=download)
+            self.assertEqual(calls,[])
