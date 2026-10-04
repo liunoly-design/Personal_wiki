@@ -46,16 +46,19 @@ export function parseCommand(text) {
  if(match[1]==='讨论')return {action:'reserved',mode:match[1]};
  let body=match[4],refresh=match[2]==='重新收集';
  if(/^重新收集\s*[：:]?/u.test(body)){refresh=true;body=body.replace(/^重新收集\s*[：:]?\s*/u,'');}
+ let videoMode;
+ if(/^(原画质|压缩)\s+/u.test(body)&&[...body.matchAll(/https?:\/\/[^\s<>，。；]+/gu)].some(m=>{try{return ['v.douyin.com','douyin.com','www.douyin.com','www.iesdouyin.com','iesdouyin.com'].includes(new URL(m[0]).hostname);}catch{return false;}})){videoMode=body.startsWith('原画质')?'original':'compressed';body=body.replace(/^(原画质|压缩)\s+/u,'');}
  const split=body.match(/(?:^|\n)\s*(?:备注|背景|个人备注|个人背景)\s*[：:]([\s\S]*)$/u);
  let background=split?.[1].trim()??'';
  if(split)body=body.slice(0,split.index);
  const urls=[...body.matchAll(/https?:\/\/[^\s<>，。；]+/gu)].map(m=>m[0]);
  if(urls.length){
+  if(urls.some(url=>{try{return /(^|\.)douyin\.com$/.test(new URL(url).hostname);}catch{return false;}}))videoMode??='compressed';
   const items=urls.map(url=>{try{const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||(u.port&&u.port!=='443'))throw Error();return {url};}catch{return {inputError:'Unsupported source URL'};}});
   const extra=body.replace(/https?:\/\/[^\s<>，。；]+/gu,'').replace(/^[\s：:,，;；]+|[\s：:,，;；]+$/gu,'');
   background=[extra,background].filter(Boolean).join('\n');
-  if(urls.length===1&&items[0].url&&!background&&!refresh)return {action:'record',url:urls[0]};
-  return {action:'record',url:items[0].url,items,background,refresh};
+  if(urls.length===1&&items[0].url&&!background&&!refresh&&!videoMode)return {action:'record',url:urls[0]};
+  return {action:'record',url:items[0].url,items,background,refresh,...(videoMode?{videoMode}:{})};
  }
  if(!body.trim())return {action:'invalid'};
  return {action:'record',items:[{text:body}],background,refresh};

@@ -1,3 +1,4 @@
+import {isDouyin,collectDouyin} from './douyin.js';
 import {mkdir,readFile,writeFile,readdir,copyFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -37,6 +38,7 @@ async function captureHashes(directory){
 }
 export async function collectCanonical(options){
  if(options.inputError)throw Error(options.inputError);
+ if(isDouyin(options.url)&&!options.isVideoPrepared)return collectDouyin(options,collectCanonical);
  const {url,vault,workspace,python,signal,onStage=async()=>{}}=options;
  await mkdir(workspace,{recursive:true,mode:0o700});
  const staging=join(workspace,'staging');await mkdir(staging,{recursive:true,mode:0o700});
@@ -102,7 +104,7 @@ export async function collectCanonical(options){
  // Existing staged archives are resumed by importAndCompile, including models
  // interrupted before a complete generation was saved.
  delete adapters.lookupExisting;
- let result=await recordArticle({url,vault:staging,signal,onStage,sourceContext:options.text!==undefined?'来源是用户粘贴的资料。text.personal-wiki.invalid 是本机内容标识，不是网页出处，不得虚构原作者或原网页。':''},adapters);
+ let result=await recordArticle({url,vault:staging,signal,onStage,sourceContext:options.sourceContext??(options.text!==undefined?'来源是用户粘贴的资料。text.personal-wiki.invalid 是本机内容标识，不是网页出处，不得虚构原作者或原网页。':'')},adapters);
  if(result.reading?.status!=='complete')throw Error(result.reading?.reason??'Chinese reading incomplete; retry required');
  if(result.attachmentStatus!=='complete'&&!captured.publicBlog&&!captured.resumableMedia)throw Error('Attachments incomplete; retry required');
  await api.assertPublisherReady?.();

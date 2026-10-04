@@ -18,6 +18,42 @@ def rewrite_links(body, path, mapping):
 
 def publish(request):
     target = Root(request['vault'])
+    if request.get('operation')=='douyin-media':
+        lock=target.lock()
+        origin=None
+        try:
+            vid=request['videoId'];mode=request['mode']
+            if not re.fullmatch('[0-9]{10,24}',vid) or mode not in ('compressed','original'):raise ValueError('Invalid video identity/mode')
+            origin=Root(request['directory']);base=f'raw/assets/douyin-{vid}/{mode}'
+            assets={}
+            for name in ['video.mp4','audio.m4a']:
+                data=origin.read(name);target.immutable(base+'/'+name,data);assets[base+'/'+name]=sha(data)
+            # Share the verified archived inode with local media work aliases.
+            # This avoids permanently storing two compressed videos/audios.
+            # Cross-filesystem installs retain their verified work copies.
+            for name in ['video.mp4','audio.m4a']:
+                archive_fd,archive_name=target.parent(base+'/'+name)
+                work_fd,work_name=origin.parent(name)
+                temporary='.shared-'+name
+                try:
+                    if sha(origin.read(name))!=assets[base+'/'+name]:raise ValueError('Concurrent work media changed')
+                    try:
+                        os.link(archive_name,temporary,src_dir_fd=archive_fd,dst_dir_fd=work_fd,follow_symlinks=False)
+                        os.replace(temporary,work_name,src_dir_fd=work_fd,dst_dir_fd=work_fd);os.fsync(work_fd)
+                    except OSError as error:
+                        if error.errno!=18:raise
+                finally:
+                    os.close(archive_fd);os.close(work_fd)
+            provenance=encode(request['media'])
+            target.immutable(base+'/media.json',provenance);assets[base+'/media.json']=sha(provenance)
+            page=f'wiki/queries/douyin-{vid}-{mode}-media.md'
+            label='压缩归档视频' if mode=='compressed' else '原画质下载流（非作者上传原文件）'
+            body=f'# 抖音媒体归档\n\n来源：https://www.douyin.com/video/{vid}\n\n保存模式：{mode}\n\n[{label}](../../{base}/video.mp4)\n\n[独立完整音频](../../{base}/audio.m4a)\n\n[媒体元数据与转换记录](../../{base}/media.json)\n\n此页仅确认媒体保存；全文与知识处理以任务状态和来源主阅读页为准，不能将视频简介视为全文。\n'
+            target.immutable(page,body.encode())
+            return dict(files={page:sha(body.encode())},assets=assets,supplement=page)
+        finally:
+            if origin:os.close(origin.fd)
+            os.close(lock);os.close(target.fd)
     if request.get('operation')=='supplement':
         lock=target.lock()
         try:

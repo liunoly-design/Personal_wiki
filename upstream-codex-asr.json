@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/Wangnov/codex-asr",
+  "version": "0.1.2",
+  "inspectedCommit": "479f6a7a3db81fe2a23d4755b0ccbeb4400317d4",
+  "license": "MIT",
+  "asset": "https://github.com/Wangnov/codex-asr/releases/download/v0.1.2/codex-asr-aarch64-apple-darwin.tar.xz",
+  "sha256": "22e7b6243ded5d6394d72a2b397422cfefb874430b5933462df6c765782adf03",
+  "backend": "Unofficial ChatGPT transcribe; local runtime auth only; no stability/free promise",
+  "validatedSegmentSeconds": 60,
+  "executableSha256": "53f41369046f73429ba3a20f556d1fe311ac5ea7eab6358a652be945247f9437"
+}

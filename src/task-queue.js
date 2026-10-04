@@ -12,6 +12,9 @@ export async function acquireQueueLease(directory,python){
  return async()=>{await new Promise(resolve=>{child.once('exit',resolve);child.stdin.end();});};
 }
 function waitingReason(message,attempts){
+ if(/ASR unknown cloud result/iu.test(message))return 'waiting_unknown';
+ if(/ASR backend unavailable|ASR backend version changed|ASR empty voiced|ASR suspected truncation|ASR retry budget exhausted/iu.test(message))return 'waiting_asr';
+ if(/Private or non-public|DNS resolution|Non-public DoH/iu.test(message))return 'waiting_network';
  if(/Unsupported source URL/iu.test(message))return 'waiting_input';
  if(/402|quota|capacity|额度/iu.test(message))return 'waiting_capacity';
  if(/401|403|login|captcha|验证码|登录/iu.test(message))return 'waiting_login';
@@ -37,6 +40,7 @@ export async function openTaskQueue({stateDir,python,run,deliver,notifyWaiting,n
   return{duplicate:false,jobId:job.id};
  }
  async function cleanup(job){
+  if(job.result?.retainWorkspace)return;
   const directory=join(work,job.id);let info;try{info=await lstat(directory);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(info?.isSymbolicLink())throw Error('Refusing symlink workspace cleanup');
   if(info)await rm(directory,{recursive:true,force:true});

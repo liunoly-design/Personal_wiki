@@ -47,12 +47,13 @@ def safe_destination(directory,relative):
     return dest
 
 
-def download(url,dest,limit=LIMIT,approved=False):
+def download(url,dest,limit=LIMIT,approved=False,validate_url=None,resolve_addresses=public_addresses):
     """Single network attempt. Range resumes only with an exact strong validator."""
     partial=dest.with_suffix(dest.suffix+'.part');progress=partial.with_suffix(partial.suffix+'.json')
     current=url
     for _ in range(6):
-        u,addresses=public_addresses(current);connection=PinnedHTTPS(u.hostname,addresses[0])
+        if validate_url:validate_url(current)
+        u,addresses=resolve_addresses(current);connection=PinnedHTTPS(u.hostname,addresses[0])
         old=json.loads(progress.read_text()) if progress.exists() else {}
         offset=partial.stat().st_size if partial.exists() and old.get('url')==current and old.get('validator') else 0
         if not approved and offset>=limit:raise ConfirmationRequired('Download reached 1 GB; confirmation required')

@@ -77,6 +77,11 @@
         "type": "boolean",
         "default": false,
         "description": "Use canonical nashsu library, durable tasks and native API verification."
+      },
+      "asrBinary": {
+        "type": "string",
+        "pattern": "^/",
+        "description": "Pinned codex-asr 0.1.2 executable for explicitly authorized Douyin cloud transcription; no paid fallback."
       }
     },
     "allOf": [
