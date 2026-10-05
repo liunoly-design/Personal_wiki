@@ -1,18 +1,19 @@
 import {createHash} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
 const sha256=value=>createHash('sha256').update(value).digest('hex');
 const id=value=>{if(!/^[A-Za-z0-9_-]{1,128}$/.test(value??''))throw Error('Invalid service ID');return value;};
 export class MediaServiceClient {
- constructor({baseUrl,token,timeoutMs=15000}) {
+ constructor({baseUrl,token,timeoutMs=15000,signal}) {
   this.base=new URL(baseUrl);
   if(!['http:','https:'].includes(this.base.protocol)||this.base.username||this.base.password||this.base.search||this.base.hash||this.base.pathname!=='/')throw Error('Invalid service base URL');
   if(typeof token!=='string'||!token||/[\r\n]/.test(token))throw Error('Service token required');
   if(!Number.isFinite(timeoutMs)||timeoutMs<=0)throw Error('Invalid request timeout');
-  this.token=token;this.timeoutMs=timeoutMs;
+  this.token=token;this.timeoutMs=timeoutMs;this.signal=signal;
  }
  async request(path,{method='GET',body,headers={},maxBytes=8*1024*1024}={}) {
   const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),this.timeoutMs);
   try {
-   const response=await fetch(new URL(path,this.base),{method,redirect:'error',signal:abort.signal,headers:{...headers,Authorization:`Bearer ${this.token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
+   const response=await fetch(new URL(path,this.base),{method,redirect:'error',signal:this.signal?AbortSignal.any([abort.signal,this.signal]):abort.signal,headers:{...headers,Authorization:`Bearer ${this.token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
    if(!response.ok)throw Error(`Media service HTTP ${response.status}`);
    let size=0;const chunks=[];
    for await(const chunk of response.body){size+=chunk.length;if(size>maxBytes){abort.abort();throw Error('Media service response too large');}chunks.push(chunk);}
@@ -49,7 +50,11 @@ export class MediaServiceClient {
   if(source?.platform!=='douyin'||!/^\d{10,24}$/.test(source.id??'')||typeof source.url!=='string'||!nullableText(source.title)||!nullableText(source.author)||!(source.published_at===null||typeof source.published_at==='string'&&Number.isFinite(Date.parse(source.published_at)))||!(source.duration_seconds===null||Number.isFinite(source.duration_seconds)&&source.duration_seconds>=0))throw Error('Media service invalid source metadata');
   let sourceURL;try{sourceURL=new URL(source.url);}catch{throw Error('Media service invalid source URL');}
   if(sourceURL.protocol!=='https:'||sourceURL.username||sourceURL.password||!['douyin.com','www.douyin.com','v.douyin.com','iesdouyin.com','www.iesdouyin.com'].includes(sourceURL.hostname))throw Error('Media service invalid source URL');
-  if(asr?.engine!=='whisper.cpp'||typeof asr.model!=='string'||!asr.model||!/^[a-f0-9]{64}$/.test(asr.model_sha256??'')||asr.language!=='zh')throw Error('Media service invalid transcription metadata');
+  if(asr?.engine!=='whisper.cpp'||typeof asr.model!=='string'||!asr.model||!/^[a-f0-9]{64}$/.test(asr.model_sha256??'')||typeof asr.language!=='string'||!asr.language)throw Error('Media service invalid transcription metadata');
+  if(asr.language!=='zh'){
+   const tr=manifest.translation;
+   if(tr?.kind!=='derived_machine_translation'||tr.source_language!==asr.language||tr.target_language!=='zh'||typeof tr.model!=='string'||!tr.model||!/^[a-f0-9]{64}$/.test(tr.model_sha256??'')||tr.coverage?.all_source_segments_present!==true||!Number.isSafeInteger(tr.coverage.source_segments)||tr.coverage.source_segments<=0)throw Error('Media service Chinese translation missing or incomplete');
+  }
   for(const kind of ['video','audio','cover']){
    const media=manifest.media?.[kind];
    if(!new RegExp(`^/v1/media/[A-Za-z0-9_-]{1,128}/${kind}$`).test(media?.path??''))throw Error('Media service invalid media path');
@@ -63,7 +68,7 @@ export class MediaServiceClient {
  async wait(jobId,{timeoutMs=600000,pollMs=2000}={}) {
   id(jobId);if(!Number.isFinite(timeoutMs)||timeoutMs<=0||!Number.isFinite(pollMs)||pollMs<=0)throw Error('Invalid polling timeout');
   const deadline=Date.now()+timeoutMs;
-  while(Date.now()<deadline){const job=await this.status(jobId);if(job.status==='succeeded')return this.result(jobId);if(['failed','partial_failed','waiting_login','waiting_confirmation'].includes(job.status))throw Error(`Media service task ${jobId}: ${job.status}`);await new Promise(r=>setTimeout(r,Math.min(pollMs,Math.max(0,deadline-Date.now()))));}
+  while(Date.now()<deadline){const job=await this.status(jobId);if(job.status==='succeeded')return this.result(jobId);if(['failed','partial_failed','waiting_login','waiting_confirmation'].includes(job.status))throw Error(`Media service task ${jobId}: ${job.status}`);await delay(Math.min(pollMs,Math.max(0,deadline-Date.now())),undefined,{signal:this.signal});}
   throw Error(`Media service wait timed out; resume job ${jobId}`);
  }
  async playback(mediaId,kind='video') {

@@ -94,3 +94,11 @@ fetch/wait 同时保存 transcript.md 与 transcript.md.manifest.json，排他�
 固定 IP 使用路由器 DHCP 保留，核实网卡MAC、DHCP范围和冲突；mini优先192.168.31.136，其他电脑实测后生成绑定表。部署launchd，说明是否依赖登录；关闭终端后继续运行、异常重启、重启机器后恢复必须分别测试。
 
 交付真实样本的完整解码、音轨时长、完整转写、原始封面、全部哈希、重复提交、重启恢复、鉴权、Range/拖动播放、播放链接过期测试。运行本仓库客户端从另一台电脑联调 health/submit/status/wait/playback/probe，返回脱敏报告；本机合成服务通过不能替代跨设备真实验收。不能把服务上线当作 Wiki 已发布/可全文检索；该集成另有受保护发布验收。
+
+## 2026-10-05 真实样本语种补充（双方客户端与服务端同步）
+
+指定样本音轨为英文。`transcription.language` 必须记录原音轨真实识别语种（此例 `en`），不能伪标 `zh`。`options.language=zh` 表示请求中文交付；英文音轨的完整原始 ASR 保留，同时追加带时间戳的完整中文机器译文，不能覆盖原文。
+
+非中文原音轨的成功结果必须额外包含 `translation`：`kind=derived_machine_translation`、`source_language` 与原始语种相同、`target_language=zh`、真实 `model`/`model_sha256`、`coverage.source_segments` 正整数及 `coverage.all_source_segments_present=true`。记录翻译引擎、版本、原稿哈希、模型来源和耗时。翻译未完成返回 `partial_failed` 或 `waiting_confirmation`。
+
+客户端保留中文 ASR 校验，并接受上述完整中文派生译文。除本项外保持原 v1 接口、状态集合、认证与幂等约束。原客户端只接受 language=zh，联调前必须使用本包更新后的客户端或同步相同检查与测试。

@@ -1,4 +1,5 @@
 import {isDouyin,collectDouyin} from './douyin.js';
+import {collectRemoteDouyin} from './remote-douyin.js';
 import {mkdir,readFile,writeFile,readdir,copyFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -38,7 +39,7 @@ async function captureHashes(directory){
 }
 export async function collectCanonical(options){
  if(options.inputError)throw Error(options.inputError);
- if(isDouyin(options.url)&&!options.isVideoPrepared)return collectDouyin(options,collectCanonical);
+ if(isDouyin(options.url)&&!options.isVideoPrepared)return options.mediaServiceUrl?collectRemoteDouyin(options,collectCanonical):collectDouyin(options,collectCanonical);
  const {url,vault,workspace,python,signal,onStage=async()=>{}}=options;
  await mkdir(workspace,{recursive:true,mode:0o700});
  const staging=join(workspace,'staging');await mkdir(staging,{recursive:true,mode:0o700});
@@ -80,7 +81,7 @@ export async function collectCanonical(options){
  const flash={extract:memo('extract',async(...args)=>{const value=await options.flash.extract(...args);if(!validSlug(value.slug))throw Error('Invalid source name');return {...value,terms:[]};}),explain:memo('explain',options.flash.explain)};
  const adapters=createAdapters({vault:staging,python,captureDirectory:join(workspace,'capture'),browserProfile:options.browserProfile,flash,reading:true,
   generate:memo('generate',async input=>{const value=await (options.generate??createCodex({binary:options.codexBinary,model:options.compilerModel}))(input);if(input.stage==='generation'){const parsed=parseFileBlocks(value);if(parsed.warnings.length||parsed.truncatedPaths.length||!parsed.blocks.length||parsed.blocks.some(b=>b.path!=='wiki/log.md'&&!/^wiki\/(sources|concepts|entities|topics|synthesis)\/[a-z][a-z0-9-]*\.md$/u.test(b.path))||!parsed.blocks.some(b=>b.path==='wiki/sources/'+input.sourceName+'.md')){await saveJSON(join(workspace,'rejected-generation.json'),{sourceName:input.sourceName,paths:parsed.blocks.map(b=>b.path),warnings:parsed.warnings,value});throw Error('Incomplete or unsafe generation; rejected response retained for diagnosis');}}return value;}),
-  translate:options.translate??codexTranslator(options.codexBinary)});
+  preparedReadingModel:options.preparedReadingModel,translate:options.translate??codexTranslator(options.codexBinary)});
  const capture=options.capture??(options.text!==undefined?async()=>{const directory=pendingPublication?.captureDirectory??join(workspace,'capture','package');await mkdir(directory,{recursive:true});await writeFile(join(directory,'article.md'),options.text);return {directory,text:options.text,status:'complete'};}:adapters.capture);
  const captured=await memo('capture',async(...args)=>{const value=await capture(...args);if(value.status!=='complete'&&!((value.publicBlog||value.resumableMedia)&&value.status==='partial'))throw Error('Attachments incomplete; retry required');return value;})(url,signal);
  const originals=captured.directory;

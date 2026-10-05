@@ -58,7 +58,7 @@ export function codexTranslator(binary){
  const generate=createCodex({binary,model:'gpt-5.6-terra'});
  return async({text,signal})=>generate({signal,prompt:'把下面 Markdown 的所有英文正文完整翻译为中文。忠实保留每个事实、限定条件、句子顺序、标题级别、列表、表格及引文；不得摘要、扩写、删减或加解释。WIKI_KEEP_ 开头的占位符必须逐字保留且各出现一次。只输出译文 Markdown，不加外围代码围栏。\n\n'+text});
 }
-export async function buildChineseReading({vault,record,translate,python,signal}){
+export async function buildChineseReading({vault,record,translate,python,signal,preparedModel}){
  await store({operation:'verify',vault,sourceId:record.id},{python,signal});
  const cache=join(vault,'.personal-wiki/readings',record.id);
  try{return JSON.parse(await readFile(join(cache,'result.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -66,6 +66,7 @@ export async function buildChineseReading({vault,record,translate,python,signal}
  const content=[];
  // Extraction metadata stays in the immutable original, not in translated prose.
  const body=original.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u,'');
+ if(preparedModel)return store({operation:'reading',vault,sourceId:record.id,content:body,model:preparedModel},{python,signal});
  for(const unit of units(body)){
   signal?.throwIfAborted();
   if(unit.literal!==undefined){content.push(unit.literal);continue;}

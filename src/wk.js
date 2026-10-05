@@ -51,14 +51,15 @@ export function parseCommand(text) {
  const split=body.match(/(?:^|\n)\s*(?:备注|背景|个人备注|个人背景)\s*[：:]([\s\S]*)$/u);
  let background=split?.[1].trim()??'';
  if(split)body=body.slice(0,split.index);
- const urls=[...body.matchAll(/https?:\/\/[^\s<>，。；]+/gu)].map(m=>m[0]);
+ const urls=[...new Set([...body.matchAll(/https?:\/\/[^\s<>，。；]+/gu)].map(m=>{try{const u=new URL(m[0]);return /(^|\.)douyin\.com$/.test(u.hostname)?m[0].replace(/[)）】\]」』！!？?]+$/u,''):m[0];}catch{return m[0];}}))];
  if(urls.length){
   if(urls.some(url=>{try{return /(^|\.)douyin\.com$/.test(new URL(url).hostname);}catch{return false;}}))videoMode??='compressed';
   const items=urls.map(url=>{try{const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||(u.port&&u.port!=='443'))throw Error();return {url};}catch{return {inputError:'Unsupported source URL'};}});
   const extra=body.replace(/https?:\/\/[^\s<>，。；]+/gu,'').replace(/^[\s：:,，;；]+|[\s：:,，;；]+$/gu,'');
-  background=[extra,background].filter(Boolean).join('\n');
+  const shareText=videoMode&&/复制打开抖音/u.test(body)?body:undefined;
+  background=[shareText?'':extra,background].filter(Boolean).join('\n');
   if(urls.length===1&&items[0].url&&!background&&!refresh&&!videoMode)return {action:'record',url:urls[0]};
-  return {action:'record',url:items[0].url,items,background,refresh,...(videoMode?{videoMode}:{})};
+  return {action:'record',url:items[0].url,items,background,refresh,...(shareText?{shareText}:{}),...(videoMode?{videoMode}:{})};
  }
  if(!body.trim())return {action:'invalid'};
  return {action:'record',items:[{text:body}],background,refresh};

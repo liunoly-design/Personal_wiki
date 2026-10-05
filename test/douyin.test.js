@@ -5,7 +5,7 @@ test('explicit original quality in a Douyin share freezes a mode without becomin
  const parsed=parseCommand('小婕 wk 记录：原画质 7.99 复制打开抖音 https://v.douyin.com/Example/ :7pm');
  assert.equal(parsed.videoMode,'original');
  assert.equal(parsed.items[0].url,'https://v.douyin.com/Example/');
- assert.equal(parsed.background,'7.99 复制打开抖音  :7pm');
+ assert.equal(parsed.background,'');assert.match(parsed.shareText,/7.99 复制打开抖音/);
 });
 import {mkdtemp,mkdir,writeFile,readFile,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';

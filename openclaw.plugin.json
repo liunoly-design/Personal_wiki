@@ -82,6 +82,16 @@
         "type": "string",
         "pattern": "^/",
         "description": "Pinned codex-asr 0.1.2 executable for explicitly authorized Douyin cloud transcription; no paid fallback."
+      },
+      "mediaServiceUrl": {
+        "type": "string",
+        "pattern": "^https?://",
+        "description": "LAN v1 media service for Douyin; no local fallback when configured."
+      },
+      "mediaServiceTokenFile": {
+        "type": "string",
+        "pattern": "^/",
+        "description": "Owned private file containing media service token; never inline credentials."
       }
     },
     "allOf": [

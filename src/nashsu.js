@@ -7,14 +7,14 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile);
 const root=resolve(import.meta.dirname,'..');
-export function createAdapters({vault,python,captureDirectory,browserProfile,flash,refresh=false,codexBinary,compilerModel,reading=false,publishSources=false,translate=codexTranslator(codexBinary),generate=createCodex({binary:codexBinary,model:compilerModel})}){
+export function createAdapters({vault,python,captureDirectory,browserProfile,flash,refresh=false,codexBinary,compilerModel,reading=false,publishSources=false,preparedReadingModel,translate=codexTranslator(codexBinary),generate=createCodex({binary:codexBinary,model:compilerModel})}){
  return {
   ...flash,
   async retryReading(sourceId,signal){
    if(!/^[a-f0-9]{20}$/u.test(sourceId))throw Error('Invalid source ID');
    const record=JSON.parse(await readFile(join(vault,'.personal-wiki',sourceId+'.json'),'utf8'));
    if(!record.source.startsWith(join(vault,'raw/inputs')+'/'))throw Error('Existing archives are not back-translated');
-   return buildChineseReading({vault,record,translate,python,signal});
+   return buildChineseReading({vault,record,translate,python,signal,preparedModel:preparedReadingModel});
   },
   async lookupExisting(url,signal){
    if(refresh)return null;
@@ -50,7 +50,7 @@ export function createAdapters({vault,python,captureDirectory,browserProfile,fla
    await onStage('compiled',{compilation:compiled});
    if(!reading)return compiled;
    await onStage('translating',{reading:{status:'processing'}});
-   try{return {...compiled,reading:await buildChineseReading({vault,record,translate,python,signal})};}
+   try{return {...compiled,reading:await buildChineseReading({vault,record,translate,python,signal,preparedModel:preparedReadingModel})};}
    catch(error){return {...compiled,reading:{status:'pending',reason:error.message}};}
 
   },

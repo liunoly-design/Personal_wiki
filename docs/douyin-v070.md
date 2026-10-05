@@ -1,6 +1,6 @@
 # 0.7.0 Douyin usage and recovery
 
-Local candidate; production remains 0.6.2. [Acceptance and limits](research/v0.7.0-acceptance-2026-10-04.md). Do not run `deploy-local.mjs` under the current authorization.
+Historical local candidate. Current remote implementation and deployment status: [0.7.1](douyin-v071.md). [Acceptance and limits](research/v0.7.0-acceptance-2026-10-04.md). The original 0.7.0 authorization was implementation-only; the later user request explicitly authorizes remote 0.7.1 deployment.
 
 After separately authorized deployment, the existing explicit commands are:
 
