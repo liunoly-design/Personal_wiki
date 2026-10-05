@@ -102,3 +102,7 @@ fetch/wait 同时保存 transcript.md 与 transcript.md.manifest.json，排他�
 非中文原音轨的成功结果必须额外包含 `translation`：`kind=derived_machine_translation`、`source_language` 与原始语种相同、`target_language=zh`、真实 `model`/`model_sha256`、`coverage.source_segments` 正整数及 `coverage.all_source_segments_present=true`。记录翻译引擎、版本、原稿哈希、模型来源和耗时。翻译未完成返回 `partial_failed` 或 `waiting_confirmation`。
 
 客户端保留中文 ASR 校验，并接受上述完整中文派生译文。除本项外保持原 v1 接口、状态集合、认证与幂等约束。原客户端只接受 language=zh，联调前必须使用本包更新后的客户端或同步相同检查与测试。
+
+## 2026-10-06 中文逐句阅读补充
+
+用户要求 Wiki 主正文只保存完整中文逐句译文，英文原稿单独归档供核对。非中文视频的中文译文与原始 ASR 逐条保留相同时间戳、数量和顺序，不合并时间段，不以摘要代替。详见 [0.7.2 中文视频正文](../specs/v0.7.2-chinese-video-reading.md)。189 个原稿段合成79个译文段不能视为逐句验收通过；须更新中文派生结果及准确 manifest 哈希，保留原始转写与媒体。客户端缺译或对齐失败保留任务、暂停发布。

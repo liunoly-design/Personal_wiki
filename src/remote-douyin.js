@@ -6,6 +6,27 @@ import {saveJSON,optionalJSON} from './durable-files.js';
 import {acquireQueueLease} from './task-queue.js';
 import {localNashsuAPI} from './nashsu-api.js';
 const hash=value=>createHash('sha256').update(value).digest('hex');
+function chineseTranscript(markdown,manifest){
+ const heading=manifest.translation?/^## 完整中文译文[^\n]*\n/gmu:/^## 完整(?:中文|原始)转写[^\n]*\n/gmu;
+ const sections=[...markdown.matchAll(heading)];
+ if(sections.length!==1)throw Error('Remote media Chinese transcript section missing or ambiguous');
+ const start=sections[0].index+sections[0][0].length;
+ const rest=markdown.slice(start);const end=rest.search(/^#{1,2} /mu);
+ const text=(end<0?rest:rest.slice(0,end)).trim();
+ const segments=[...text.matchAll(/^\[([\d:.]+(?:\s*→\s*[\d:.]+)?)\][ \t]+([^\r\n]+)$/gmu)];
+ if(!segments.length||segments.some(s=>!s[2].trim())||!/[\u4e00-\u9fff]/u.test(segments.map(s=>s[2]).join('')))throw Error('Remote media Chinese timestamped transcript missing');
+ if(manifest.translation){
+  const originals=[...markdown.matchAll(/^## 完整原始转写[^\n]*\n/gmu)];
+  if(originals.length!==1)throw Error('Remote media original transcript section missing or ambiguous');
+  const remainder=markdown.slice(originals[0].index+originals[0][0].length);const boundary=remainder.search(/^#{1,2} /mu);
+  const original=boundary<0?remainder:remainder.slice(0,boundary);
+  const originalSegments=[...original.matchAll(/^\[([\d:.]+(?:\s*→\s*[\d:.]+)?)\][ \t]+([^\r\n]+)$/gmu)];
+  if(!originalSegments.length||originalSegments.some(s=>!s[2].trim()))throw Error('Remote media original timestamped transcript missing');
+  const stamps=originalSegments.map(s=>s[1]);
+  if(stamps.length!==manifest.translation.coverage.source_segments||segments.length!==stamps.length||segments.some((s,i)=>s[1]!==stamps[i]))throw Error('Remote media Chinese sentence alignment incomplete; original task retained');
+ }
+ return text;
+}
 async function privateDirectory(path){await mkdir(path,{recursive:true,mode:0o700});for(let p=path;;p=dirname(p)){if(!(await lstat(p)).isDirectory())throw Error('Remote media state must be a regular directory');if(p===dirname(p))break;}}
 export async function collectRemoteDouyin(options,collect) {
  const {url,vault,python,signal,onStage=async()=>{}}=options;
@@ -39,21 +60,23 @@ export async function collectRemoteDouyin(options,collect) {
  const {manifest,markdown}=result;
  if(markdown.includes(token)||JSON.stringify(manifest).includes(token)||/https?:\/\/[^\s)]+\/play\//u.test(markdown))throw Error('Remote media Markdown contains forbidden credentials or temporary capabilities');
  // A shared source/version lease prevents alias links from publishing twice.
- const directory=join(base,'sources',manifest.source.id+'-'+hash(JSON.stringify(manifest)));
+ const chinese=chineseTranscript(markdown,manifest);
+ const directory=join(base,'sources',manifest.source.id+'-'+hash(JSON.stringify(manifest)+':chinese-sentences-v1'));
  await privateDirectory(directory);release=await acquireQueueLease(directory,python);
  try{
   const snapshot=join(directory,'snapshot');await privateDirectory(snapshot);
   await saveMediaResult(join(snapshot,'transcript.md'),result);
   for(const kind of ['video','audio','cover'])await client.probe(manifest.media[kind].path.split('/')[3],kind);
-  const article=`> 来源为Mac mini保存的完整机器转写${manifest.translation?'及中文机器译文':''}；未经人工校订。视频与完整音轨保存在远程服务器，媒体读取需认证。\n\n`+markdown.replace(/\]\((\/v1\/media\/[A-Za-z0-9_-]+\/(?:video|audio|cover))\)/gu,(_whole,path)=>`](${client.base.origin}${path})`);
+  const title=(manifest.source.title??'抖音视频').replace(/[\r\n]/gu,' ');
+  const article=`# ${title}\n\n> 完整中文逐句${manifest.translation?'机器译文':'机器转写'}；未经人工校订。保留时间戳，不以摘要替代全文。\n\n来源：${manifest.source.url}\n\n## 完整中文正文\n\n${chinese}\n\n## 媒体与来源核对\n\n${['video','audio','cover'].map(kind=>`[${{video:'视频',audio:'完整音频',cover:'封面'}[kind]}](${client.base.origin}${manifest.media[kind].path})`).join(' · ')}\n\n[完整原始转写与来源资料](transcript.md)（独立归档，仅供核对）\n`;
   await saveMediaResult(join(snapshot,'article.md'),{markdown:article,manifest});
   await onStage('remote_knowledge',{video:{...report,transcriptStatus:'complete',sourceLanguage:manifest.transcription.language}});
   const publishedPath=join(directory,'published.json');const saved=await optionalJSON(publishedPath);
-  const compiled=await collect({...options,url:manifest.source.url,isVideoPrepared:true,workspace:saved?options.workspace:join(directory,'knowledge'),api,previousResult:saved,refresh:false,preparedReadingModel:manifest.translation?.model??`whisper.cpp ${manifest.transcription.model}`,capture:async()=>({directory:snapshot,text:article,status:'complete'}),sourceContext:'单一视频来源；平台描述、英文原始机器稿、中文派生机器译文分别标记，机器内容未经人工核实。原视频和完整音频保存在Mac mini，manifest包含其哈希；不得声称本机保存了完整媒体。'});
+  const compiled=await collect({...options,url:manifest.source.url,isVideoPrepared:true,workspace:saved?options.workspace:join(directory,'knowledge'),api,previousResult:saved,refresh:false,preparedReadingModel:manifest.translation?.model??`whisper.cpp ${manifest.transcription.model}`,capture:async()=>({directory:snapshot,text:article,status:'complete'}),sourceContext:'单一视频来源；主正文是完整中文逐句译文或中文转写，保留时间戳，不把英文原稿或摘要作为正文。英文原稿只在独立来源附件中供核对，机器内容未经人工核实。原视频和完整音频保存在Mac mini，manifest包含其哈希；不得声称本机保存了完整媒体。'});
   const completed={...compiled,retainWorkspace:false,video:{...report,transcriptStatus:'complete',knowledgeStatus:'complete',sourceLanguage:manifest.transcription.language,media:manifest.media,mediaBase:client.base.origin,id:manifest.source.id}};
   const {userRecord,...shared}=completed;await saveJSON(publishedPath,shared);
   const page=await api.read(relative(vault,completed.source));
-  const probe=markdown.split('\n').filter(line=>/^\[[\d:.]+(?:\s*→\s*[\d:.]+)?\]/u.test(line)).map(line=>line.replace(/^\[[\d:.]+(?:\s*→\s*[\d:.]+)?\]\s*/u,'').trim()).find(line=>line.length>=8&&/[\u4e00-\u9fff]/u.test(line))?.slice(0,40);
+  const probe=chinese.split('\n').filter(line=>/^\[[\d:.]+(?:\s*→\s*[\d:.]+)?\]/u.test(line)).map(line=>line.replace(/^\[[\d:.]+(?:\s*→\s*[\d:.]+)?\]\s*/u,'').trim()).find(line=>line.length>=8&&/[\u4e00-\u9fff]/u.test(line))?.slice(0,40);
   if(!probe||!page.includes(probe))throw Error('Remote transcript readback verification failed');
   const found=await api.search(probe);
   if(!found.results?.some(r=>(r.path??r.file_path??r.filePath)===relative(vault,completed.source)))throw Error('Remote transcript search verification failed');
