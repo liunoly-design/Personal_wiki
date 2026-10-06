@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+from threading import Event, Thread
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright
 try:
@@ -24,7 +25,9 @@ def browser_html(url,profile,login=False):
         for domain in allowed:
             try:_,addresses=public_addresses('https://'+domain);rules.append(f'MAP {domain} {addresses[0]}')
             except OSError:pass
-        rules.append('MAP * ~NOTFOUND')
+        # Chrome resolves the local system proxy through these rules too.
+        # This permits its transport; the request route still denies local URLs.
+        rules.extend(['MAP * ~NOTFOUND','EXCLUDE 127.0.0.1'])
         with sync_playwright() as p:
             context=p.chromium.launch_persistent_context(str(profile),channel='chrome',headless=not login,args=['--host-resolver-rules='+','.join(rules)],service_workers='block')
             envelopes=[];size=0
@@ -33,6 +36,8 @@ def browser_html(url,profile,login=False):
                 if u.scheme!='https' or u.hostname not in allowed or u.username or u.password or u.port not in (None,443):request.abort();return
                 request.continue_()
             context.route('**/*',route)
+            # Unconnected routed WebSockets cannot reach any server, including loopback.
+            context.route_web_socket('**/*',lambda websocket:None)
             page=context.pages[0] if context.pages else context.new_page()
             def response(r):
                 nonlocal size
@@ -46,7 +51,14 @@ def browser_html(url,profile,login=False):
             try:
                 page.goto(url,wait_until='domcontentloaded',timeout=60000)
                 if login:
-                    input('请在专用Wiki窗口完成当前平台登录/验证码，完成后在终端按回车。Cookie只保留在此隔离配置中。')
+                    finished=Event()
+                    def wait_for_user():
+                        try:input('请在专用Wiki窗口完成当前平台登录/验证码，完成后在终端按回车。Cookie只保留在此隔离配置中。')
+                        except EOFError:pass
+                        finally:finished.set()
+                    Thread(target=wait_for_user,daemon=True).start()
+                    # Keep Playwright's HTTP callbacks running while the user logs in.
+                    while not finished.is_set():page.wait_for_timeout(100)
                 else:
                     page.wait_for_timeout(2000)
                     if '/login' in page.url or '/i/flow' in page.url or page.locator('input[type="password"], #captcha, [data-testid="LoginForm"]').count():raise ValueError('login/captcha required; complete dedicated browser login')
