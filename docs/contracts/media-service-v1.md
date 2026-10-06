@@ -107,6 +107,6 @@ fetch/wait 同时保存 transcript.md 与 transcript.md.manifest.json，排他�
 
 用户要求 Wiki 主正文只保存完整中文逐句译文，英文原稿单独归档供核对。非中文视频的中文译文与原始 ASR 逐条保留相同时间戳、数量和顺序，不合并时间段，不以摘要代替。详见 [0.7.2 中文视频正文](../specs/v0.7.2-chinese-video-reading.md)。189 个原稿段合成79个译文段不能视为逐句验收通过；须更新中文派生结果及准确 manifest 哈希，保留原始转写与媒体。客户端缺译或对齐失败保留任务、暂停发布。
 
-## 0.7.3 来源与媒体完整性补充
+## 0.7.7 来源与媒体完整性补充
 
-新客户端要求成功manifest提供绑定分享链接、作品ID链路以及视频/音轨完整解码、实际文件哈希/字节数和时长的verification证据。任务失败应提供白名单stage与error.code/retryable，不能用health正常代替恢复。具体字段、容差及反例验收见 [0.7.3 规格](../specs/v0.7.3-douyin-verification.md)。旧manifest缺证据会暂停发布，服务端须同步后重新联调。
+新客户端要求成功manifest提供绑定分享链接、作品ID链路以及视频/音轨完整解码、实际文件哈希/字节数和时长的verification证据。任务失败应提供白名单stage与error.code/retryable，不能用health正常代替恢复。具体字段、容差及反例验收见 [0.7.7 规格](../specs/v0.7.7-douyin-verification.md)。旧manifest缺证据会暂停发布，服务端须同步后重新联调。
