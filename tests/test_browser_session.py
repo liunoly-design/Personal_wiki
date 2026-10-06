@@ -1,9 +1,10 @@
 """Opt-in real Chrome checks; synthetic pages and disposable profiles only."""
 import os
+from io import StringIO
 import socket
 import tempfile
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,6 +15,44 @@ from scripts.browser_session import browser_html
 
 @unittest.skipUnless(os.environ.get('WIKI_BROWSER_INTEGRATION') == '1', 'requires local Chrome')
 class BrowserSessionTest(unittest.TestCase):
+    def test_closing_login_page_or_context_exits_cleanly_and_releases_profile(self):
+        import fcntl
+        for close_context in (False, True):
+            with self.subTest(close_context=close_context), tempfile.TemporaryDirectory() as directory:
+                profile = os.path.join(directory, 'x.com')
+                release_input = Event()
+                output = StringIO()
+
+                @contextmanager
+                def synthetic_browser():
+                    with sync_playwright() as playwright:
+                        def launch(*args, **kwargs):
+                            kwargs['args'] += ['--no-proxy-server']
+                            context = playwright.chromium.launch_persistent_context(*args, **kwargs)
+                            page = context.pages[0]
+                            page.route('https://x.com/**', lambda route: route.fulfill(
+                                body='<script>setTimeout(()=>console.log("close-login-window"),300)</script>',
+                                content_type='text/html'))
+                            cdp = context.new_cdp_session(page)
+                            def close_on_signal(message):
+                                if message.text == 'close-login-window':
+                                    cdp.send('Browser.close' if close_context else 'Page.close')
+                            page.on('console', close_on_signal)
+                            return context
+                        yield SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch))
+
+                try:
+                    with patch('scripts.browser_session.sync_playwright', synthetic_browser), \
+                         patch('scripts.browser_session.public_addresses', return_value=('x.com', ['93.184.216.34'])), \
+                         patch('builtins.input', side_effect=lambda _: release_input.wait(10)), \
+                         redirect_stdout(output):
+                        self.assertEqual(browser_html('https://x.com/synthetic', profile, login=True), '')
+                    self.assertIn('登录是否完成尚未核验', output.getvalue())
+                    with open(profile + '.lock') as lock:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    release_input.set()
+
     def test_manual_login_keeps_api_requests_running_without_local_websocket_access(self):
         api_seen = Event()
         api_processed_while_waiting = Event()
