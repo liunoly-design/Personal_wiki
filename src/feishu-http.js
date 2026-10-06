@@ -1,4 +1,12 @@
 // Only these Feishu APIs are used; article URLs and provider error bodies are never followed/logged.
+export function resolveWikiFeishuAccount(hostConfig,accountId,{explicit=false}={}){
+ const channel=hostConfig.channels?.feishu;
+ if(!explicit)return {...channel,...channel?.accounts?.[accountId]};
+ const account=channel?.accounts?.[accountId]??(accountId==='default'?channel:undefined);
+ if(!account)throw Error('Selected Feishu account unavailable');
+ return {...account,...(channel?.enabled===false?{enabled:false}:{}),...(!account.domain&&channel?.domain?{domain:channel.domain}:{})};
+}
+
 export function createFeishuClient({ credentials, fetchImpl = fetch, timeoutMs = 10000 }) {
   let token, expires = 0;
   async function request(path, body, bearer, parentSignal) {

@@ -1,5 +1,7 @@
 # 个人 Wiki / Personal Wiki
 
+2026-10-06：新增[独立安装、自检与配置回退入口](docs/independent-install.md)，[隔离验收报告](docs/research/independent-install-acceptance-2026-10-06.md)。支持自己的库、私有状态、账号范围与模型Agent，不依赖PGTD/Apple。真实OpenClaw CLI隔离安装/加载/重复/回退及校验失败保护通过；这是工具源码交付，不代表正式网关升级、新Mac或真实账号验收。
+
 2026-10-04：0.7.0 抖音实现候选已本地开发，[使用与恢复](docs/douyin-v070.md)、[验收报告](docs/research/v0.7.0-acceptance-2026-10-04.md)。指定抖音公开下载受限；真实该来源发布/查询/飞书回执未完成，未部署生产。60秒分段云ASR已做非私人合成语音长音频试验；不能替代自然语音人工参考验收。
 
 0.6.2 同议题持续记录：明确保存默认追加同一文档，显式新记录才另建；原回复保真、稳定D/K、历史与未知结果恢复。见[使用与验收](docs/v0.6.2-usage.md)、[SPEC](docs/specs/v0.6.2-continuous-topic.md)、[实际交付证据](docs/research/v0.6.2-acceptance-2026-10-03.md)。真实飞书体验仍需用户发起验收。

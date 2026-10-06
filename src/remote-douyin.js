@@ -36,7 +36,7 @@ export async function collectRemoteDouyin(options,collect) {
  if(!tokenStat.isFile()||(tokenStat.mode&0o077)||tokenStat.uid!==process.getuid())throw Error('Remote media credential file must be owned and private');
  const token=(await readFile(options.mediaServiceTokenFile,'utf8')).trim();
  const client=new MediaServiceClient({baseUrl:options.mediaServiceUrl,token,signal});
- const api=options.api??await localNashsuAPI(vault,{signal,maxAttempts:1});await api.assertPublisherReady?.();
+ const api=options.api??await localNashsuAPI(vault,{signal,maxAttempts:1,statePath:options.nashsuStatePath});await api.assertPublisherReady?.();
  const base=join(options.stateDir,'remote-video');await privateDirectory(base);
  const alias=join(base,'jobs',hash(url));await privateDirectory(alias);
  let release=await acquireQueueLease(alias,python);

@@ -1,3 +1,4 @@
+import {openClawGoogleKey} from '../src/openclaw-auth.js';
 import {readFile,readdir} from 'node:fs/promises';
 import {join,isAbsolute,resolve,relative} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -12,7 +13,7 @@ import {openReviewService,createReviewStore} from '../src/review-service.js';
 import {localNashsuAPI} from '../src/nashsu-api.js';
 import {openDiscussion} from '../src/discussion.js';
 import {createCodex} from '../src/codex.js';
-import {createFeishuClient} from '../src/feishu-http.js';
+import {createFeishuClient,resolveWikiFeishuAccount} from '../src/feishu-http.js';
 const shellQuote=value=>"'"+value.replaceAll("'", "'\"'\"'")+"'";
 function loginCommand(job,config){const profile=join(config.stateDir,'browser',createHash('sha256').update(job.sender+':'+job.chat).digest('hex').slice(0,16),new URL(job.url).hostname);return [config.python,resolve(import.meta.dirname,'../scripts/browser_session.py'),'--login','--url',job.url,'--profile',profile].map(shellQuote).join(' ');}
 function waitingText(job,config){
@@ -25,11 +26,11 @@ function waitingText(job,config){
 }
 export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFeishu,flash:injectedFlash,collect=collectCanonical,nashsu,queryGenerate,store}){
  for(const key of ['vault','stateDir','python'])if(!isAbsolute(config[key]??''))throw Error('Absolute paths required');
- const account={...hostConfig.channels?.feishu,...hostConfig.channels?.feishu?.accounts?.[config.accountId]};
+ const account=resolveWikiFeishuAccount(hostConfig,config.accountId,{explicit:!injectedFeishu&&config.strictFeishuAccount});
  if(!injectedFeishu&&(account.enabled===false||(account.domain&&account.domain!=='feishu')))throw Error('Feishu account unavailable');
  const feishu=injectedFeishu??createFeishuClient({credentials:()=>({appId:account.appId,appSecret:account.appSecret})});
- const flash=injectedFlash??createFlash({proxyUrl:config.flashProxyUrl,model:config.flashModel??'gemini-flash-latest',maxAttempts:1,usagePath:join(config.stateDir,'flash-usage.jsonl')});
- const api=nashsu??(signal=>localNashsuAPI(config.vault,{signal,maxAttempts:1}));
+ const flash=injectedFlash??createFlash({apiKey:openClawGoogleKey({agentId:config.wikiAgentId??'wiki',packageDir:config.openclawPackageDir,hostConfig}),packageDir:config.openclawPackageDir,proxyUrl:config.flashProxyUrl,model:config.flashModel??'gemini-flash-latest',maxAttempts:1,usagePath:join(config.stateDir,'flash-usage.jsonl')});
+ const api=nashsu??(signal=>localNashsuAPI(config.vault,{signal,maxAttempts:1,statePath:config.nashsuStatePath}));
  const notes=async scope=>{const found=[];for(const dir of ['tasks','completed'])for(const name of await readdir(join(config.stateDir,dir))){if(!/^[a-f0-9]{64}\.json$/.test(name))continue;const j=JSON.parse(await readFile(join(config.stateDir,dir,name),'utf8'));if(j.sender!==scope.SenderId||j.chat!==scope.NativeChannelId||!j.result?.userRecord)continue;const path=relative(config.vault,j.result.userRecord);const source=relative(config.vault,j.result.source);if(/^wiki\/queries\/user-note-[a-f0-9]{64}\.md$/.test(path))found.push({path,source});}return found;};
  const generate=queryGenerate??createCodex({binary:config.codexBinary,model:config.compilerModel,textOnly:true,timeoutMs:120000});
  const knowledge=await openKnowledgeQuery({stateDir:config.stateDir,api,notes,generate});
@@ -40,7 +41,7 @@ export async function openCanonicalRuntime({config,hostConfig,feishu:injectedFei
  const allowed=job=>config.allowedSenderIds.includes(job.sender)&&config.allowedConversationIds.includes(job.chat);
  function check(scope){if(scope.Provider!=='feishu'||scope.AccountId!==config.accountId||!allowed({sender:scope.SenderId,chat:scope.NativeChannelId}))throw Error('Wiki scope denied');}
  const queue=await openTaskQueue({stateDir:config.stateDir,python:config.python,allowed,
-  run:(job,workspace,signal,onStage,previousResult)=>collect({url:job.url,text:job.text,inputError:job.inputError,background:job.background,requestId:job.id,refresh:job.refresh,vault:config.vault,workspace,python:config.python,flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel,signal,onStage,previousResult,mediaAction:job.mediaAction,mediaApprovals:job.mediaApprovals,videoMode:job.videoMode,videoRecovery:job.videoRecovery,stateDir:config.stateDir,asrBinary:config.asrBinary,mediaServiceUrl:config.mediaServiceUrl,mediaServiceTokenFile:config.mediaServiceTokenFile,shareText:job.shareText,browserProfile:job.browserAuthorization?join(config.stateDir,'browser',createHash('sha256').update(job.sender+':'+job.chat).digest('hex').slice(0,16),new URL(job.url).hostname):undefined}),
+  run:(job,workspace,signal,onStage,previousResult)=>collect({url:job.url,text:job.text,inputError:job.inputError,background:job.background,requestId:job.id,refresh:job.refresh,vault:config.vault,nashsuStatePath:config.nashsuStatePath,workspace,python:config.python,flash,codexBinary:config.codexBinary,compilerModel:config.compilerModel,signal,onStage,previousResult,mediaAction:job.mediaAction,mediaApprovals:job.mediaApprovals,videoMode:job.videoMode,videoRecovery:job.videoRecovery,stateDir:config.stateDir,asrBinary:config.asrBinary,mediaServiceUrl:config.mediaServiceUrl,mediaServiceTokenFile:config.mediaServiceTokenFile,shareText:job.shareText,browserProfile:job.browserAuthorization?join(config.stateDir,'browser',createHash('sha256').update(job.sender+':'+job.chat).digest('hex').slice(0,16),new URL(job.url).hostname):undefined}),
   notifyWaiting:async(job,signal)=>{
    const reply=await feishu.reply({replyTo:job.messageId,text:waitingText(job,config),uuid:createHash('sha256').update(job.id+':waiting:'+String(job.controlMessages?.length??0)).digest('hex').slice(0,32)},{signal});
    if(!reply?.message_id||reply.chat_id!==job.chat)throw Error('Delivery result unknown');return reply.message_id;

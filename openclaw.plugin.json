@@ -92,6 +92,21 @@
         "type": "string",
         "pattern": "^/",
         "description": "Owned private file containing media service token; never inline credentials."
+      },
+      "nashsuStatePath": {
+        "type": "string",
+        "pattern": "^/",
+        "description": "Optional explicit local nashsu state; fixed Vault registration is still verified."
+      },
+      "openclawPackageDir": {
+        "type": "string",
+        "pattern": "^/",
+        "description": "Optional installed OpenClaw package for credential and proxy resolution."
+      },
+      "strictFeishuAccount": {
+        "type": "boolean",
+        "default": false,
+        "description": "Require the selected named account to own its credentials; independent installs enable this."
       }
     },
     "allOf": [

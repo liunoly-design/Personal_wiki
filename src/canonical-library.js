@@ -43,7 +43,7 @@ export async function collectCanonical(options){
  const {url,vault,workspace,python,signal,onStage=async()=>{}}=options;
  await mkdir(workspace,{recursive:true,mode:0o700});
  const staging=join(workspace,'staging');await mkdir(staging,{recursive:true,mode:0o700});
- const api=options.api??await localNashsuAPI(vault,{signal,maxAttempts:1});
+ const api=options.api??await localNashsuAPI(vault,{signal,maxAttempts:1,statePath:options.nashsuStatePath});
  const pendingPublication=await optionalJSON(join(workspace,'published.json'));
  const saved=pendingPublication??(!options.refresh?options.previousResult:null);
  const verifyReuse=async result=>{await verifyPublication({...result,files:Object.fromEntries(Object.entries(result.files).filter(([path])=>path.startsWith('raw/')))},{vault,api});await api.read('wiki/sources/'+result.source.split('/').at(-1));};

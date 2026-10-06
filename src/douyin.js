@@ -32,7 +32,7 @@ export async function collectDouyin(options,collect){
  const mode=options.videoMode??'compressed';if(!['compressed','original'].includes(mode))throw Error('Invalid video mode');
  const base=join(options.stateDir??dirname(options.workspace),'video-jobs');await safeDirectory(base);
  const pipeline=options.pipeline??(request=>videoPipeline(request,{python,signal}));
- const api=options.api??await localNashsuAPI(vault,{signal,maxAttempts:1});
+ const api=options.api??await localNashsuAPI(vault,{signal,maxAttempts:1,statePath:options.nashsuStatePath});
  await api.assertPublisherReady?.();
  const alias=join(base,'aliases',hash(options.url)+'.json');
  let meta=await optionalJSON(alias);

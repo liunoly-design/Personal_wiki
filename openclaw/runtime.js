@@ -1,3 +1,4 @@
+import {openClawGoogleKey} from '../src/openclaw-auth.js';
 import {openCanonicalRuntime} from './canonical-runtime.js';
 import {mkdir,readFile,writeFile,rename,readdir,link,unlink} from 'node:fs/promises';
 import {join,isAbsolute} from 'node:path';
@@ -5,16 +6,16 @@ import {createHash,randomUUID} from 'node:crypto';
 import {recordArticle,parseCommand} from '../src/wk.js';
 import {createFlash} from '../src/flash.js';
 import {createAdapters} from '../src/nashsu.js';
-import {createFeishuClient} from '../src/feishu-http.js';
+import {createFeishuClient,resolveWikiFeishuAccount} from '../src/feishu-http.js';
 async function save(path,value){await writeFile(path+'.tmp',JSON.stringify(value,null,2),{mode:0o600});await rename(path+'.tmp',path);}
 export async function openRuntime({config,hostConfig,feishu:injectedFeishu,makeAdapters=createAdapters,flash:injectedFlash}){
  if(config.canonicalLibrary)return openCanonicalRuntime({config,hostConfig,feishu:injectedFeishu,flash:injectedFlash});
  for(const key of ['vault','stateDir','python'])if(!isAbsolute(config[key]??''))throw Error('Absolute paths required');
  const jobs=join(config.stateDir,'jobs');await mkdir(jobs,{recursive:true,mode:0o700});
- const account={...hostConfig.channels?.feishu,...hostConfig.channels?.feishu?.accounts?.[config.accountId]};
+ const account=resolveWikiFeishuAccount(hostConfig,config.accountId,{explicit:!injectedFeishu&&config.strictFeishuAccount});
  if(!injectedFeishu&&(account.enabled===false||(account.domain&&account.domain!=='feishu')))throw Error('Feishu account unavailable');
  const feishu=injectedFeishu??createFeishuClient({credentials:()=>({appId:account.appId,appSecret:account.appSecret})});
- const flash=injectedFlash??createFlash({proxyUrl:config.flashProxyUrl,model:config.flashModel??'gemini-flash-latest',usagePath:join(config.stateDir,'flash-usage.jsonl')});
+ const flash=injectedFlash??createFlash({apiKey:openClawGoogleKey({agentId:config.wikiAgentId??'wiki',packageDir:config.openclawPackageDir,hostConfig}),packageDir:config.openclawPackageDir,proxyUrl:config.flashProxyUrl,model:config.flashModel??'gemini-flash-latest',usagePath:join(config.stateDir,'flash-usage.jsonl')});
  let timer,running=false,closed=false;const controller=new AbortController();
  function checkScope(c){if(c.Provider!=='feishu'||c.AccountId!==config.accountId||!config.allowedSenderIds.includes(c.SenderId)||!config.allowedConversationIds.includes(c.NativeChannelId))throw Error('Wiki scope denied');}
  async function processJobs(){
