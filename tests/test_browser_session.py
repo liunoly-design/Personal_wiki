@@ -15,6 +15,48 @@ from scripts.browser_session import browser_html
 
 @unittest.skipUnless(os.environ.get('WIKI_BROWSER_INTEGRATION') == '1', 'requires local Chrome')
 class BrowserSessionTest(unittest.TestCase):
+    def test_x_login_can_load_the_platform_onboarding_frame(self):
+        from urllib.parse import urlsplit
+        form_visible = Event()
+
+        @contextmanager
+        def synthetic_browser():
+            with sync_playwright() as playwright:
+                def launch(*args, **kwargs):
+                    kwargs['args'] += ['--no-proxy-server']
+                    context = playwright.chromium.launch_persistent_context(*args, **kwargs)
+                    install_route = context.route
+
+                    class SyntheticTransport:
+                        def __init__(self, route):
+                            self.route = route
+                            self.request = route.request
+                        def abort(self):self.route.abort()
+                        def continue_(self):
+                            host = urlsplit(self.request.url).hostname
+                            body = '<iframe src="https://jf.x.com/onboarding/web"></iframe>' if host == 'x.com' else '<input aria-label="电子邮件或用户名">'
+                            self.route.fulfill(body=body, content_type='text/html')
+
+                    # Keep the production authorization handler; replace its network transport.
+                    context.route = lambda pattern, handler: install_route(pattern, lambda route: handler(SyntheticTransport(route)))
+                    page = context.pages[0]
+                    wait = page.wait_for_timeout
+                    def inspect_form(timeout):
+                        wait(timeout)
+                        for frame in page.frames:
+                            if frame.url.startswith('https://jf.x.com/') and frame.get_by_role('textbox').is_visible():
+                                form_visible.set()
+                    page.wait_for_timeout = inspect_form
+                    return context
+                yield SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch))
+
+        with tempfile.TemporaryDirectory() as profile, \
+             patch('scripts.browser_session.sync_playwright', synthetic_browser), \
+             patch('scripts.browser_session.public_addresses', return_value=('x.com', ['93.184.216.34'])), \
+             patch('builtins.input', side_effect=lambda _: form_visible.wait(5)):
+            browser_html('https://x.com/synthetic', profile, login=True)
+        self.assertTrue(form_visible.is_set(), 'platform onboarding was blocked and no account input appeared')
+
     def test_closing_login_page_or_context_exits_cleanly_and_releases_profile(self):
         import fcntl
         for close_context in (False, True):

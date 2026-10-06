@@ -16,7 +16,7 @@ except ImportError:
 def browser_html(url,profile,login=False):
     host=urlsplit(url).hostname
     if host not in ('x.com','mp.weixin.qq.com'):raise ValueError('Unsupported login platform')
-    allowed=('x.com','api.x.com','twitter.com','api.twitter.com','abs.twimg.com','pbs.twimg.com','video.twimg.com') if host=='x.com' else ('mp.weixin.qq.com','res.wx.qq.com','mmbiz.qpic.cn','mmbiz.qlogo.cn')
+    allowed=('x.com','jf.x.com','api.x.com','twitter.com','api.twitter.com','abs.twimg.com','pbs.twimg.com','video.twimg.com') if host=='x.com' else ('mp.weixin.qq.com','res.wx.qq.com','mmbiz.qpic.cn','mmbiz.qlogo.cn')
     profile=Path(profile);profile.mkdir(parents=True,exist_ok=True,mode=0o700);os.chmod(profile,0o700)
     lock=(profile.parent/(profile.name+'.lock')).open('w')
     try:
@@ -50,7 +50,7 @@ def browser_html(url,profile,login=False):
                     if len(raw)>2*1024*1024:return
                     size+=len(raw);envelopes.append(json.loads(raw))
                 except Exception:pass
-            page.on('response',response)
+            if not login:page.on('response',response)
             try:
                 page.goto(url,wait_until='domcontentloaded',timeout=60000)
                 if login:
