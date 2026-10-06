@@ -19,12 +19,13 @@ test('remote video publishes Chinese sentences, keeps original separately, resum
  const vault=join(root,'vault');await mkdir(vault);const token=join(root,'token');await writeFile(token,'fixture-token',{mode:0o600});
  let body='# 合成公开视频\n\n## 完整中文译文（本地机器翻译）\n\n[00:00] 完整末尾凤凰校验。\n\n## 完整原始转写（english）\n\n[00:00] Complete original.\n';
  const manifest={api_version:'1',job_id:'remote_1',source:{platform:'douyin',id:'7691977131957472558',url:'https://www.douyin.com/video/7691977131957472558',title:'合成视频',author:'合成作者',published_at:null,duration_seconds:3},transcription:{engine:'whisper.cpp',model:'small',model_sha256:'a'.repeat(64),language:'en'},translation:{kind:'derived_machine_translation',source_language:'en',target_language:'zh',model:'synthetic',model_sha256:'b'.repeat(64),coverage:{source_segments:1,all_source_segments_present:true}},markdown:{sha256:createHash('sha256').update(body).digest('hex')},media:Object.fromEntries(['video','audio','cover'].map(kind=>[kind,{path:'/v1/media/'+kind+'_1/'+kind,sha256:'c'.repeat(64),bytes:1000,mime:{video:'video/mp4',audio:'audio/mp4',cover:'image/jpeg'}[kind]}]))};
+ manifest.verification={input_url:'https://v.douyin.com/Example/',resolved_id:manifest.source.id,detail_id:manifest.source.id,downloaded_id:manifest.source.id,...Object.fromEntries(['video','audio'].map(kind=>[kind,{full_decode:true,sha256:manifest.media[kind].sha256,bytes:1000,duration_seconds:3}]))};
  let submissions=0,modelCalls=0,searchOffline=true;
  const server=createServer(async(req,res)=>{
   assert.equal(req.headers.authorization,'Bearer fixture-token');
   if(req.url==='/v1/jobs'){submissions++;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({api_version:'1',job_id:'remote_1',status:'succeeded',reused:false}));return;}
   if(req.url.endsWith('/markdown')){res.setHeader('Content-Type','text/markdown');res.end(body);return;}
-  if(req.url.startsWith('/v1/media/')){if(!Object.values(manifest.media).some(m=>m.path===req.url)){res.writeHead(404);res.end();return;}res.writeHead(206,{'Content-Range':'bytes 0-15/1000'});res.end('0123456789abcdef');return;}
+  if(req.url.startsWith('/v1/media/')){if(!Object.values(manifest.media).some(m=>m.path===req.url)){res.writeHead(404);res.end();return;}const [,startText,endText]=/^bytes=(\d+)-(\d+)$/.exec(req.headers.range);const start=Number(startText),end=Math.min(Number(endText),999);res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/1000`});res.end(Buffer.alloc(end-start+1));return;}
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify(req.url.endsWith('/manifest')?manifest:{api_version:'1',job_id:'remote_1',status:'succeeded'}));
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
  const options={url:'https://v.douyin.com/Example/',mediaServiceUrl:`http://127.0.0.1:${server.address().port}`,mediaServiceTokenFile:token,vault,stateDir:join(root,'state'),workspace:join(root,'work'),python:'/usr/bin/python3',pipeline:async()=>{throw Error('Local backend must not run');},translate:async()=>{throw Error('Already translated remote text must not be translated again');},flash:{extract:async()=>({slug:'remote-video-example',terms:[]}),explain:async()=>[]},generate:async({stage})=>{modelCalls++;return stage==='analysis'?'分析':'---FILE: wiki/sources/remote-video-example.md---\n# 资料卡\n来源摘要。\n---END FILE---';},api:{read:path=>readFile(join(vault,path),'utf8'),search:async()=>({results:searchOffline?[]:[{path:'wiki/sources/remote-video-example.md'}]})}};
@@ -69,4 +70,9 @@ test('authenticated Feishu share passes remote settings and reports remote authe
   assert.equal((await runtime.status(scope,job.jobId)).status,'waiting_remote_auth');assert.match(replies[0],/Mac mini媒体处理待恢复/);assert.ok(!replies[0].includes('本机专用Wiki浏览器'));
   message.sender.id='forged';await assert.rejects(runtime.acceptMessage(scope,'om_share'),/Source mismatch/);
  }finally{await runtime.close();}
+});
+
+test('a Douyin message containing two distinct links is rejected before submission',()=>{
+ const result=parseCommand('小婕 wk 记录：复制打开抖音 https://v.douyin.com/first/ https://v.douyin.com/second/');
+ assert.equal(result.action,'invalid');
 });

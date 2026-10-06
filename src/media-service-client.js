@@ -1,7 +1,18 @@
+import {verifyMediaEvidence} from './media-verification.js';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 const sha256=value=>createHash('sha256').update(value).digest('hex');
 const id=value=>{if(!/^[A-Za-z0-9_-]{1,128}$/.test(value??''))throw Error('Invalid service ID');return value;};
+function failureDetails(job){
+ const stages=['resolving','metadata','downloading','extracting','transcribing','translating','verifying'];
+ const codes=['PROCESSING_FAILED','SOURCE_RESOLUTION_FAILED','DETAIL_FETCH_FAILED','SOURCE_UNAVAILABLE','AUTH_REQUIRED','DOWNLOAD_FAILED','MEDIA_INVALID','EXTRACTION_FAILED','ASR_FAILED','TRANSLATION_FAILED','VERIFICATION_FAILED','SOURCE_MISMATCH'];
+ const failure={status:job.status,stage:stages.includes(job.stage)?job.stage:'unknown',code:codes.includes(job.error?.code)?job.error.code:'UNKNOWN',retryable:typeof job.error?.retryable==='boolean'?job.error.retryable:'unknown'};
+ return failure;
+}
+function taskFailure(jobId,job){
+ const failure=failureDetails(job);
+ const error=Error(`Media service task ${jobId}: ${job.status}; stage=${failure.stage}; code=${failure.code}; retryable=${failure.retryable}`);error.remoteFailure=failure;return error;
+}
 export class MediaServiceClient {
  constructor({baseUrl,token,timeoutMs=15000,signal}) {
   this.base=new URL(baseUrl);
@@ -40,8 +51,8 @@ export class MediaServiceClient {
   const data=await this.json('/v1/jobs',{method:'POST',body,headers:{'Idempotency-Key':key}});
   id(data.job_id);return {...data,idempotency_key:key};
  }
- async status(jobId){const data=await this.json(`/v1/jobs/${id(jobId)}`);if(data.job_id!==jobId||!['queued','downloading','extracting','transcribing','succeeded','failed','partial_failed','waiting_login','waiting_confirmation'].includes(data.status))throw Error('Media service invalid task state');return data;}
- async result(jobId) {
+ async status(jobId){const data=await this.json(`/v1/jobs/${id(jobId)}`);if(data.job_id!==jobId||!['queued','downloading','extracting','transcribing','succeeded','failed','partial_failed','waiting_login','waiting_confirmation'].includes(data.status))throw Error('Media service invalid task state');const detail=failureDetails(data);return {api_version:'1',job_id:jobId,status:data.status,stage:detail.stage,...(data.error?{error:{code:detail.code,retryable:detail.retryable}}:{}),...Object.fromEntries(['created_at','updated_at'].filter(key=>typeof data[key]==='string'&&/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?$/u.test(data[key])&&Number.isFinite(Date.parse(data[key]))).map(key=>[key,data[key]]))};}
+ async result(jobId,{expectedSourceUrl}={}) {
   if((await this.status(jobId)).status!=='succeeded')throw Error('Media service result not ready');
   const manifest=await this.json(`/v1/jobs/${id(jobId)}/manifest`);
   if(manifest.job_id!==jobId||!/^[a-f0-9]{64}$/.test(manifest.markdown?.sha256??''))throw Error('Media service invalid manifest');
@@ -50,6 +61,7 @@ export class MediaServiceClient {
   if(source?.platform!=='douyin'||!/^\d{10,24}$/.test(source.id??'')||typeof source.url!=='string'||!nullableText(source.title)||!nullableText(source.author)||!(source.published_at===null||typeof source.published_at==='string'&&Number.isFinite(Date.parse(source.published_at)))||!(source.duration_seconds===null||Number.isFinite(source.duration_seconds)&&source.duration_seconds>=0))throw Error('Media service invalid source metadata');
   let sourceURL;try{sourceURL=new URL(source.url);}catch{throw Error('Media service invalid source URL');}
   if(sourceURL.protocol!=='https:'||sourceURL.username||sourceURL.password||!['douyin.com','www.douyin.com','v.douyin.com','iesdouyin.com','www.iesdouyin.com'].includes(sourceURL.hostname))throw Error('Media service invalid source URL');
+  if((sourceURL.port&&sourceURL.port!=='443')||sourceURL.pathname!==`/video/${source.id}`)throw Error('Media service source identity mismatch');
   if(asr?.engine!=='whisper.cpp'||typeof asr.model!=='string'||!asr.model||!/^[a-f0-9]{64}$/.test(asr.model_sha256??'')||typeof asr.language!=='string'||!asr.language)throw Error('Media service invalid transcription metadata');
   if(asr.language!=='zh'){
    const tr=manifest.translation;
@@ -60,15 +72,16 @@ export class MediaServiceClient {
    if(!new RegExp(`^/v1/media/[A-Za-z0-9_-]{1,128}/${kind}$`).test(media?.path??''))throw Error('Media service invalid media path');
    if(!/^[a-f0-9]{64}$/.test(media.sha256??'')||!Number.isSafeInteger(media.bytes)||media.bytes<=0||typeof media.mime!=='string'||!media.mime.startsWith({video:'video/',audio:'audio/',cover:'image/'}[kind]))throw Error('Media service invalid media metadata');
   }
+  verifyMediaEvidence(manifest,expectedSourceUrl);
   const {response,bytes}=await this.request(`/v1/jobs/${id(jobId)}/markdown`);
   if(!response.headers.get('content-type')?.startsWith('text/markdown')||sha256(bytes)!==manifest.markdown.sha256)throw Error('Media service Markdown integrity mismatch');
   let markdown;try{markdown=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);}catch{throw Error('Media service invalid UTF-8');}
   return {manifest,markdown};
  }
- async wait(jobId,{timeoutMs=600000,pollMs=2000}={}) {
+ async wait(jobId,{timeoutMs=600000,pollMs=2000,expectedSourceUrl}={}) {
   id(jobId);if(!Number.isFinite(timeoutMs)||timeoutMs<=0||!Number.isFinite(pollMs)||pollMs<=0)throw Error('Invalid polling timeout');
   const deadline=Date.now()+timeoutMs;
-  while(Date.now()<deadline){const job=await this.status(jobId);if(job.status==='succeeded')return this.result(jobId);if(['failed','partial_failed','waiting_login','waiting_confirmation'].includes(job.status))throw Error(`Media service task ${jobId}: ${job.status}`);await delay(Math.min(pollMs,Math.max(0,deadline-Date.now())),undefined,{signal:this.signal});}
+  while(Date.now()<deadline){const job=await this.status(jobId);if(job.status==='succeeded')return this.result(jobId,{expectedSourceUrl});if(['failed','partial_failed','waiting_login','waiting_confirmation'].includes(job.status))throw taskFailure(jobId,job);await delay(Math.min(pollMs,Math.max(0,deadline-Date.now())),undefined,{signal:this.signal});}
   throw Error(`Media service wait timed out; resume job ${jobId}`);
  }
  async playback(mediaId,kind='video') {
@@ -79,13 +92,22 @@ export class MediaServiceClient {
   if(url.origin!==this.base.origin||url.username||url.password||!url.pathname.startsWith('/play/')||!Number.isFinite(expires)||expires<=Date.now()||expires>Date.now()+600000)throw Error('Media service invalid playback URL');
   return data;
  }
- async probe(mediaId,kind='video') {
+ async probe(mediaId,kind='video',{expectedBytes}={}) {
   if(!['video','audio','cover'].includes(kind))throw Error('Invalid media kind');
-  const {response,bytes}=await this.request(`/v1/media/${id(mediaId)}/${kind}`,{headers:{Range:'bytes=0-15'},maxBytes:16});
-  const match=/^bytes 0-(\d+)\/(\d+)$/.exec(response.headers.get('content-range')??'');
-  if(response.status!==206||!match||Number(match[1])+1!==bytes.length||Number(match[2])<bytes.length)throw Error('Media service Range unsupported');
-  return {status:206,bytes:bytes.length,total_bytes:Number(match[2])};
+  if(expectedBytes!==undefined&&(!Number.isSafeInteger(expectedBytes)||expectedBytes<=0))throw Error('Invalid expected media size');
+  const readRange=async(start,end)=>{
+   const {response,bytes}=await this.request(`/v1/media/${id(mediaId)}/${kind}`,{headers:{Range:`bytes=${start}-${end}`},maxBytes:16});
+   const match=/^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get('content-range')??'');
+   const total=Number(match?.[3]);
+   if(response.status!==206||!match||Number(match[1])!==start||Number(match[2])!==Math.min(end,total-1)||Number(match[2])-start+1!==bytes.length||!Number.isSafeInteger(total)||total<=0)throw Error('Media service Range unsupported');
+   if(expectedBytes!==undefined&&total!==expectedBytes)throw Error('Media service media size mismatch');
+   return {status:206,bytes:bytes.length,total_bytes:total};
+  };
+  const first=await readRange(0,15);
+  if(expectedBytes!==undefined)for(const start of new Set([Math.floor(expectedBytes/2),Math.max(0,expectedBytes-16)])){if(start)await readRange(start,Math.min(start+15,expectedBytes-1));}
+  return first;
  }
+
 }
 
 export async function saveMediaResult(path,{markdown,manifest}) {

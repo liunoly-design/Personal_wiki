@@ -14,7 +14,7 @@ export async function acquireQueueLease(directory,python){
 function waitingReason(message,attempts){
  if(/Remote media waiting_login|Remote media HTTP 401|Remote media HTTP 403|Media service HTTP 401|Media service HTTP 403/iu.test(message))return 'waiting_remote_auth';
  if(/Remote media waiting_confirmation/iu.test(message))return 'waiting_remote_confirmation';
- if(/^Remote media |Media service wait timed out|Media service request interrupted/iu.test(message))return 'waiting_remote';
+ if(/^(?:Remote media |Media service )/iu.test(message))return 'waiting_remote';
  if(/ASR login required/iu.test(message))return 'waiting_asr_auth';
  if(/ASR unknown cloud result/iu.test(message))return 'waiting_unknown';
  if(/ASR backend unavailable|ASR backend version changed|ASR empty voiced|ASR suspected truncation|ASR retry budget exhausted|metadata retry budget exhausted|Download retry budget exhausted/iu.test(message))return 'waiting_asr';

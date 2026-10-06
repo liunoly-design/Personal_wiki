@@ -16,7 +16,7 @@ import {createFeishuClient} from '../src/feishu-http.js';
 const shellQuote=value=>"'"+value.replaceAll("'", "'\"'\"'")+"'";
 function loginCommand(job,config){const profile=join(config.stateDir,'browser',createHash('sha256').update(job.sender+':'+job.chat).digest('hex').slice(0,16),new URL(job.url).hostname);return [config.python,resolve(import.meta.dirname,'../scripts/browser_session.py'),'--login','--url',job.url,'--profile',profile].map(shellQuote).join(' ');}
 function waitingText(job,config){
- if(job.status?.startsWith('waiting_remote'))return `【Wiki】Mac mini媒体处理待恢复。\n任务：${job.id}\n远程任务：${job.details?.video?.remoteJobId??'提交结果待核对'}\n${job.failure??''}\n已保留进度；服务恢复后发送：小婕 wk 继续：${job.id}`;
+ if(job.status?.startsWith('waiting_remote'))return `【Wiki】Mac mini媒体处理待恢复。\n任务：${job.id}\n远程任务：${job.details?.video?.remoteJobId??'提交结果待核对'}\n${job.failure??''}\n已保留任务和进度。服务在线不等于任务或校验通过；先修复上述原因，再发送：小婕 wk 继续：${job.id}`;
  const assets=job.result?.missingAssets??[];
  const video=job.result?.video??job.details?.video;
  const videoText=video?`\n视频：${video.video??'已保存'}；完整音频：${video.audio??'已保存'}；全文：${video.transcriptStatus??(typeof video.transcript==='string'?video.transcript:'尚未完成')}；知识处理：${video.knowledgeStatus??video.knowledge??'尚未完成'}\n${job.status==='waiting_unknown'?'上次云请求可能已执行；显式继续可能再次消耗额度。':''}`:'';

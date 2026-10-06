@@ -50,11 +50,11 @@ export async function collectRemoteDouyin(options,collect) {
  const report={mode:'remote',remoteJobId:remote.jobId,video:'remote',audio:'remote',transcriptStatus:'pending',knowledgeStatus:'pending'};
  await onStage('remote_waiting',{video:report});
  let result;
- try{result=await client.wait(remote.jobId,{timeoutMs:1800000});}
+ try{result=await client.wait(remote.jobId,{timeoutMs:1800000,expectedSourceUrl:url});}
  catch(error){
-  if(/: waiting_login$/u.test(error.message))throw Error('Remote media waiting_login; continue after Mac mini authentication is restored');
-  if(/: waiting_confirmation$/u.test(error.message))throw Error('Remote media waiting_confirmation; service-side approval required');
-  if(/: (?:failed|partial_failed)$/u.test(error.message))throw Error('Remote media task failed; retained job '+remote.jobId);
+  if(error.remoteFailure?.status==='waiting_login')throw Error('Remote media waiting_login; continue after Mac mini authentication is restored');
+  if(error.remoteFailure?.status==='waiting_confirmation')throw Error('Remote media waiting_confirmation; service-side approval required');
+  if(['failed','partial_failed'].includes(error.remoteFailure?.status)){const f=error.remoteFailure;throw Error(`Remote media task failed; stage=${f.stage}; code=${f.code}; retryable=${f.retryable}; retained job ${remote.jobId}`);}
   throw error;
  }
  const {manifest,markdown}=result;
@@ -66,7 +66,7 @@ export async function collectRemoteDouyin(options,collect) {
  try{
   const snapshot=join(directory,'snapshot');await privateDirectory(snapshot);
   await saveMediaResult(join(snapshot,'transcript.md'),result);
-  for(const kind of ['video','audio','cover'])await client.probe(manifest.media[kind].path.split('/')[3],kind);
+  for(const kind of ['video','audio','cover'])await client.probe(manifest.media[kind].path.split('/')[3],kind,{expectedBytes:manifest.media[kind].bytes});
   const title=(manifest.source.title??'抖音视频').replace(/[\r\n]/gu,' ');
   const article=`# ${title}\n\n> 完整中文逐句${manifest.translation?'机器译文':'机器转写'}；未经人工校订。保留时间戳，不以摘要替代全文。\n\n来源：${manifest.source.url}\n\n## 完整中文正文\n\n${chinese}\n\n## 媒体与来源核对\n\n${['video','audio','cover'].map(kind=>`[${{video:'视频',audio:'完整音频',cover:'封面'}[kind]}](${client.base.origin}${manifest.media[kind].path})`).join(' · ')}\n\n[完整原始转写与来源资料](transcript.md)（独立归档，仅供核对）\n`;
   await saveMediaResult(join(snapshot,'article.md'),{markdown:article,manifest});

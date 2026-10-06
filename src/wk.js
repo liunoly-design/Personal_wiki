@@ -54,6 +54,7 @@ export function parseCommand(text) {
  const urls=[...new Set([...body.matchAll(/https?:\/\/[^\s<>，。；]+/gu)].map(m=>{try{const u=new URL(m[0]);return /(^|\.)douyin\.com$/.test(u.hostname)?m[0].replace(/[)）】\]」』！!？?]+$/u,''):m[0];}catch{return m[0];}}))];
  if(urls.length){
   if(urls.some(url=>{try{return /(^|\.)douyin\.com$/.test(new URL(url).hostname);}catch{return false;}}))videoMode??='compressed';
+  if(videoMode&&urls.length!==1)return {action:'invalid',reason:'Douyin requires one distinct link'};
   const items=urls.map(url=>{try{const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||(u.port&&u.port!=='443'))throw Error();return {url};}catch{return {inputError:'Unsupported source URL'};}});
   const extra=body.replace(/https?:\/\/[^\s<>，。；]+/gu,'').replace(/^[\s：:,，;；]+|[\s：:,，;；]+$/gu,'');
   const shareText=videoMode&&/复制打开抖音/u.test(body)?body:undefined;
