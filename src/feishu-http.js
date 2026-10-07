@@ -51,6 +51,12 @@ export function createFeishuClient({ credentials, fetchImpl = fetch, timeoutMs =
       if (value.data?.items?.length !== 1) throw new Error('Single original message required');
       return value.data.items[0];
     },
+    async send({ chatId, text, uuid }, { signal } = {}) {
+      if (typeof chatId !== 'string' || !/^oc_[\w-]+$/u.test(chatId) || typeof text !== 'string' || !text || text.length > 4000 || !/^[a-f0-9]{32}$/u.test(uuid)) throw new Error('Invalid Feishu notification');
+      const value = await request('im/v1/messages?receive_id_type=chat_id',
+        { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text }), uuid }, await auth(signal), signal);
+      return value.data;
+    },
     async reply({ replyTo, text, uuid }, { signal } = {}) {
       const path = 'im/v1/messages/' + messageId(replyTo) + '/reply';
       const value = await request(path, { msg_type: 'text', content: JSON.stringify({ text }), uuid }, await auth(signal), signal);
