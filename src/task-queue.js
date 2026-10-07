@@ -12,7 +12,7 @@ export async function acquireQueueLease(directory,python){
  return async()=>{await new Promise(resolve=>{child.once('exit',resolve);child.stdin.end();});};
 }
 function waitingReason(message,attempts){
- const httpStatuses=[...message.matchAll(/\bHTTP\b(?:\s+(?:error|status(?:\s+code)?))?\s*[:=]?\s*(401|402|403)\b/giu)].map(match=>match[1]);
+ const httpStatuses=[...message.matchAll(/\b(?:HTTP\b(?:\s+(?:error|status(?:\s+code)?))?\s*[:=]?\s*|Client error\s+['"])(401|402|403)\b/giu)].map(match=>match[1]);
  if(/Remote media waiting_login|Remote media HTTP 401|Remote media HTTP 403|Media service HTTP 401|Media service HTTP 403/iu.test(message))return 'waiting_remote_auth';
  if(/Remote media waiting_confirmation/iu.test(message))return 'waiting_remote_confirmation';
  if(/^(?:Remote media |Media service )/iu.test(message))return 'waiting_remote';

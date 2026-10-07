@@ -18,7 +18,10 @@ test('capture paths containing HTTP-like digits retain retry and recovery behavi
  }finally{await queue.close();await rm(stateDir,{recursive:true,force:true});}
 });
 test('explicit HTTP authentication and capacity responses remain paused across restart',async()=>{
- const cases=[['Flash HTTP 402; request rejected','waiting_capacity'],['HTTP Error 403: Forbidden','waiting_login'],['HTTP status code: 401','waiting_login'],['Codex quota unavailable; waiting for quota','waiting_capacity']];
+ const cases=[['Flash HTTP 402; request rejected','waiting_capacity'],['HTTP Error 403: Forbidden','waiting_login'],['HTTP status code: 401','waiting_login'],['Codex quota unavailable; waiting for quota','waiting_capacity'],
+  ["Client error '401 Unauthorized' for url 'https://cdn.example/resource'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",'waiting_login'],
+  ["Client error '402 Payment Required' for url 'https://cdn.example/resource'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402",'waiting_capacity'],
+  ["Client error '403 Forbidden' for url 'https://cdn.example/resource'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",'waiting_login']];
  for(const [failure,expected] of cases){
   const stateDir=await mkdtemp(join(tmpdir(),'wiki-http-response-'));let runs=0;
   const options={stateDir,python:'/usr/bin/python3',run:async()=>{runs++;throw Error(failure);}};

@@ -18,14 +18,19 @@ def post_url(value):
     return f'https://x.com/{match[1].lower()}/status/{match[2]}'
 
 
-def parse_posts(soup):
-    posts={}
+def parse_posts(soup, ambiguous=None):
+    posts={};groups={}
     for node in soup.select('article'):
         links=[a for a in node.select('a[href]') if a.find_parent('article') is node and not a.has_attr('data-quote')]
         own=next((post_url(a['href']) for a in links if post_url(a['href'])),None)
-        if not own or own in posts:continue
+        if own:groups.setdefault(own,[]).append(node)
+    for own,nodes in groups.items():
         # The capture selector and final context must retain the same copy.
-        node=select_target_article(soup,own)
+        try:node=select_target_article(soup,own)
+        except ValueError:
+            if ambiguous is not None:
+                ambiguous.append(dict(url=own,id=own.rsplit('/',1)[1],author=own.split('/')[3],parents=[n.get('data-reply-to') for n in nodes if n.has_attr('data-reply-to')]))
+            continue
         quotes=[post_url(a['href']) for a in node.select('a[data-quote][href]')]
         for nested in node.select('article'):
             quote=next((post_url(a['href']) for a in nested.select('a[href]') if post_url(a['href'])),None)
@@ -33,8 +38,7 @@ def parse_posts(soup):
         clean=copy.copy(node)
         for nested in clean.select('article'):nested.decompose()
         item=dict(url=own,id=own.rsplit('/',1)[1],author=own.split('/')[3],parent=node.get('data-reply-to'),html=str(clean),quotes=list(dict.fromkeys(q for q in quotes if q)))
-        if own not in posts:posts[own]=item
-        else:posts[own]['quotes']=list(dict.fromkeys(posts[own]['quotes']+item['quotes']))
+        posts[own]=item
     # Browser/API envelopes and embedded public JSON use X's explicit reply IDs.
     def walk(value):
         if isinstance(value,list):
@@ -74,7 +78,7 @@ def parse_posts(soup):
 def collect_context(url,directory,fetch,initial_soup=None):
     target=post_url(url)
     if not target:raise ValueError('Unsupported X post URL')
-    posts={};gaps=[];seen=set();pages=[]
+    posts={};gaps=[];seen=set();pages=[];ambiguous=[]
     current=target
     for index in range(20):
         if current in seen:gaps.append('分页循环，未确认完整上下文');break
@@ -87,7 +91,7 @@ def collect_context(url,directory,fetch,initial_soup=None):
         except Exception as error:
             if index==0:raise
             gaps.append(f'分页不可读取：{current}');break
-        parsed=parse_posts(soup)
+        parsed=parse_posts(soup,ambiguous)
         if not parsed:
             raw.unlink(missing_ok=True)
             if index==0:raise ValueError('login/captcha required; X content unavailable')
@@ -110,7 +114,7 @@ def collect_context(url,directory,fetch,initial_soup=None):
             candidate=f'https://x.com/{author}/status/{parent}';raw=directory/f'ancestor-{parent}.html'
             try:
                 if not raw.exists():fetch(candidate,raw)
-                posts.update(parse_posts(BeautifulSoup(raw.read_bytes(),'html.parser')))
+                posts.update(parse_posts(BeautifulSoup(raw.read_bytes(),'html.parser'),ambiguous))
             except Exception:gaps.append(f'父帖不可读取：{candidate}');break
             found=next((p for p,v in posts.items() if v['id']==parent and v['author']==author),None)
         if not found:gaps.append('父帖作者或正文不可验证');break
@@ -123,6 +127,8 @@ def collect_context(url,directory,fetch,initial_soup=None):
         if len(children)>1:gaps.append('同作者回复分叉，顺序不能唯一确认');break
         child=children[0];chain.append(child);ids.add(posts[child]['id'])
         if len(chain)>=100:gaps.append('串文达到100帖上限');break
+    if any(p['url'] not in posts and p['author']==author and any(parent in ids for parent in p['parents']) for p in ambiguous):
+        gaps.append('相关串文存在正文副本歧义，未确认完整上下文')
     quotes=[]
     for p in chain:
         for q in posts[p]['quotes']:

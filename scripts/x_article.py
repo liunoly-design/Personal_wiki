@@ -15,7 +15,8 @@ def select_target_article(soup, url):
     # deepest matching target while retaining quotes inside it.
     leaves=[a for a in candidates if not any(b is not a and any(p is a for p in b.parents) for b in candidates)]
     def signature(a):
-        return (a.get_text(' ',strip=True),tuple((n.name,n.get('href'),n.get('src')) for n in a.select('a,img,video,source')),a.get('data-reply-to'))
+        quote_links=tuple(n['href'] for n in a.select('a[data-quote][href]') if n.find_parent('article') is a)
+        return (a.get_text(' ',strip=True),tuple((n.name,n.get('href'),n.get('src')) for n in a.select('a,img,video,source')),a.get('data-reply-to'),quote_links)
     leaves=list({signature(a):a for a in leaves}.values())
     if len(leaves)>1:
         # Responsive copies can show the same post with/without an embedded
@@ -32,7 +33,7 @@ def select_target_article(soup, url):
                     link.decompose()
             return (own.get_text(' ',strip=True),tuple(link.get('href') for link in own.select('a[href]')))
         if len({own_signature(a) for a in leaves})==1:
-            quote_sets=[{signature(q) for q in a.select('article')} for a in leaves]
+            quote_sets=[{signature(q) for q in a.select('article')} | {('quoted-link',href) for href in signature(a)[3]} for a in leaves]
             union=set().union(*quote_sets)
             references=[]
             reference_union=Counter()

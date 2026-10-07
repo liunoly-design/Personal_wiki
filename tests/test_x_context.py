@@ -4,6 +4,27 @@ from unittest.mock import patch
 from scripts.capture_article import capture
 
 class XContextTest(unittest.TestCase):
+ def test_quote_relationship_survives_duplicate_order(self):
+  marked='<article><a href="/a/status/1">post</a><p>目标正文</p><a data-quote href="/b/status/9">引用</a></article>'
+  unmarked=marked.replace(' data-quote','')
+  for html in [marked+unmarked,unmarked+marked]:
+   def request(url,hosts,limit,dest):
+    if url=='https://x.com/a/status/1':dest.write_text(html)
+    elif url=='https://x.com/b/status/9':dest.write_text('<article><a href="/b/status/9">post</a><p>引用正文</p></article>')
+    else:raise ValueError('Unexpected request')
+   with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request):
+    result=capture('https://x.com/a/status/1',temp)
+    self.assertIn('引用正文',(Path(result['directory'])/'article.md').read_text())
+ def test_unrelated_ambiguous_comments_do_not_block_target(self):
+  html='<article data-reply-to=""><a href="/a/status/1">post</a><p>目标正文</p></article><article data-reply-to="1"><a href="/b/status/2">comment</a>short</article><article data-reply-to="1"><a href="/b/status/2">comment</a>long comment</article>'
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=lambda url,hosts,limit,dest:dest.write_text(html)):
+   result=capture('https://x.com/a/status/1',temp);body=(Path(result['directory'])/'article.md').read_text()
+   self.assertEqual(result['status'],'complete');self.assertIn('目标正文',body);self.assertNotIn('comment',body);self.assertEqual(result['contextStatus'],'complete')
+ def test_ambiguous_same_author_child_retains_target_and_reports_gap(self):
+  html='<article data-reply-to=""><a href="/a/status/1">post</a><p>目标正文</p></article><article data-reply-to="1"><a href="/a/status/2">post</a>short</article><article data-reply-to="1"><a href="/a/status/2">post</a>different body</article>'
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=lambda url,hosts,limit,dest:dest.write_text(html)):
+   result=capture('https://x.com/a/status/1',temp);body=(Path(result['directory'])/'article.md').read_text()
+   self.assertIn('目标正文',body);self.assertNotIn('different body',body);self.assertEqual(result['contextStatus'],'partial');self.assertIn('副本歧义',' '.join(result['contextGaps']))
  def test_responsive_copy_keeps_visible_url_in_final_capture_and_cache(self):
   plain='<article><a href="/a/status/1">post</a><p>课程正文</p><img src="https://pbs.twimg.com/cover.jpg"></article>'
   complete='<article><a href="/a/status/1">post</a><p>课程正文</p><a href="https://example.edu/">https://example.edu/</a><img src="https://pbs.twimg.com/cover.jpg"></article>'
