@@ -1,5 +1,7 @@
 # 个人 Wiki / Personal Wiki
 
+2026-10-07：新增[局域网 Vault 备份与隔离恢复](docs/lan-backup.md)。支持挂载目录或现有 SSH 的不可变快照、目标哈希核验、缺失文件续传及恢复禁止覆盖；[SPEC](docs/specs/lan-backup.md)。Mac mini 的实际备份目录尚待用户指定，隔离测试不能代替实机验收。
+
 2026-10-06：新增[独立安装、自检与配置回退入口](docs/independent-install.md)，[隔离验收报告](docs/research/independent-install-acceptance-2026-10-06.md)。支持自己的库、私有状态、账号范围与模型Agent，不依赖PGTD/Apple。真实OpenClaw CLI隔离安装/加载/重复/回退及校验失败保护通过；这是工具源码交付，不代表正式网关升级、新Mac或真实账号验收。
 
 2026-10-04：0.7.0 抖音实现候选已本地开发，[使用与恢复](docs/douyin-v070.md)、[验收报告](docs/research/v0.7.0-acceptance-2026-10-04.md)。指定抖音公开下载受限；真实该来源发布/查询/飞书回执未完成，未部署生产。60秒分段云ASR已做非私人合成语音长音频试验；不能替代自然语音人工参考验收。
