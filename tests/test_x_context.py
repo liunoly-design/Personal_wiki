@@ -4,6 +4,20 @@ from unittest.mock import patch
 from scripts.capture_article import capture
 
 class XContextTest(unittest.TestCase):
+ def test_responsive_copy_keeps_visible_url_in_final_capture_and_cache(self):
+  plain='<article><a href="/a/status/1">post</a><p>课程正文</p><img src="https://pbs.twimg.com/cover.jpg"></article>'
+  complete='<article><a href="/a/status/1">post</a><p>课程正文</p><a href="https://example.edu/">https://example.edu/</a><img src="https://pbs.twimg.com/cover.jpg"></article>'
+  html=plain+complete
+  def request(url,hosts,limit,dest):
+   if url=='https://x.com/a/status/1':dest.write_text(html)
+   elif url=='https://pbs.twimg.com/cover.jpg':dest.write_bytes(b'synthetic cover')
+   else:raise ValueError('Unexpected unrelated request')
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request),patch('scripts.attachment_resume.download',side_effect=lambda url,dest,**kwargs:request(url,set(),0,dest)),patch('scripts.capture_article.extract_public',side_effect=OSError('No media fallback for duplicate articles')):
+   result=capture('https://x.com/a/status/1',temp);directory=Path(result['directory']);body=(directory/'article.md').read_text()
+   self.assertEqual(result['status'],'complete');self.assertEqual(body.count('课程正文'),1);self.assertIn('https://example.edu/',body)
+   self.assertEqual((directory/'raw.html').read_text(),html);self.assertEqual((directory/'images/image-01.jpg').read_bytes(),b'synthetic cover')
+   self.assertEqual(result['contextStatus'],'partial');self.assertIn('平台未提供回复关系，无法确认完整串文',result['contextGaps'])
+   self.assertEqual(capture('https://x.com/a/status/1',temp),result)
  def test_thread_pages_quotes_and_comments_have_distinct_provenance(self):
   pages={
    'https://x.com/a/status/1':'<article data-reply-to=""><a href="/a/status/1">post</a><p>首帖</p><a data-quote href="/b/status/9">引用</a></article><article data-reply-to="1"><a href="/c/status/2">comment</a><p>他人评论</p></article><a rel="next" href="/a/status/1?cursor=next">下一页</a>',

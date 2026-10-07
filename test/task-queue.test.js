@@ -2,6 +2,33 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm,access} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {openTaskQueue} from '../src/task-queue.js';
 const task={id:'a'.repeat(64),url:'https://x.com/a/status/123',sender:'ou_test',chat:'oc_test'};
+test('capture paths containing HTTP-like digits retain retry and recovery behavior',async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'wiki-http-digits-'));let clock=0;
+ const queue=await openTaskQueue({stateDir,python:'/usr/bin/python3',now:()=>clock,run:async(job,workspace)=>{
+  await writeFile(join(workspace,'raw.html'),'saved capture');
+  throw Error(`Command failed: /work/${job.id}/capture\nPublic media metadata unavailable; network/extractor failure`);
+ }});
+ try{
+  const cases=['401','402','403'].map(code=>({...task,id:'a'.repeat(30)+code+'b'.repeat(31),url:`https://x.com/a/status/${code}`}));
+  for(const item of cases)await queue.enqueue(item);
+  await queue.drain();
+  for(const item of cases){assert.equal((await queue.status(item.id)).status,'retry');assert.equal(await readFile(join(stateDir,'work',item.id,'raw.html'),'utf8'),'saved capture');}
+  for(let attempt=1;attempt<5;attempt++){clock+=4000000;await queue.drain();}
+  for(const item of cases){const current=await queue.status(item.id);assert.equal(current.status,'waiting_retry');assert.equal(current.attempts,5);}
+ }finally{await queue.close();await rm(stateDir,{recursive:true,force:true});}
+});
+test('explicit HTTP authentication and capacity responses remain paused across restart',async()=>{
+ const cases=[['Flash HTTP 402; request rejected','waiting_capacity'],['HTTP Error 403: Forbidden','waiting_login'],['HTTP status code: 401','waiting_login'],['Codex quota unavailable; waiting for quota','waiting_capacity']];
+ for(const [failure,expected] of cases){
+  const stateDir=await mkdtemp(join(tmpdir(),'wiki-http-response-'));let runs=0;
+  const options={stateDir,python:'/usr/bin/python3',run:async()=>{runs++;throw Error(failure);}};
+  let queue=await openTaskQueue(options);
+  try{
+   await queue.enqueue(task);await queue.drain();assert.equal((await queue.status(task.id)).status,expected);
+   await queue.close();queue=await openTaskQueue(options);await queue.drain();assert.equal((await queue.status(task.id)).status,expected);assert.equal(runs,1);
+  }finally{await queue.close();await rm(stateDir,{recursive:true,force:true});}
+ }
+});
 test('startup resumes an interrupted task, preserves failed work, then removes workspace only after verification',async()=>{
  const stateDir=await mkdtemp(join(tmpdir(),'wiki-queue-'));let fail=true,runs=0,clock=0;
  const options={stateDir,python:'/usr/bin/python3',now:()=>clock,run:async(job,workspace)=>{runs++;await mkdir(workspace,{recursive:true});await writeFile(join(workspace,'kept'),'recover me');if(fail)throw Error('API unavailable');return{status:'complete',sourceId:'b'.repeat(20),files:{'wiki/sources/example.md':'hash'}};}};

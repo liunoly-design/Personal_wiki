@@ -4,6 +4,10 @@ import json
 import re
 from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
+try:
+    from .x_article import select_target_article
+except ImportError:
+    from x_article import select_target_article
 
 
 def post_url(value):
@@ -19,7 +23,9 @@ def parse_posts(soup):
     for node in soup.select('article'):
         links=[a for a in node.select('a[href]') if a.find_parent('article') is node and not a.has_attr('data-quote')]
         own=next((post_url(a['href']) for a in links if post_url(a['href'])),None)
-        if not own:continue
+        if not own or own in posts:continue
+        # The capture selector and final context must retain the same copy.
+        node=select_target_article(soup,own)
         quotes=[post_url(a['href']) for a in node.select('a[data-quote][href]')]
         for nested in node.select('article'):
             quote=next((post_url(a['href']) for a in nested.select('a[href]') if post_url(a['href'])),None)

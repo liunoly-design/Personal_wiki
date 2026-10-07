@@ -21,6 +21,23 @@ class TargetTest(unittest.TestCase):
     def test_different_target_bodies_remain_ambiguous(self):
         soup=BeautifulSoup('<article><a href="/a/status/1">target</a>one</article><article><a href="/a/status/1">target</a>two</article>','html.parser')
         with self.assertRaises(ValueError):select_target_article(soup,'https://x.com/a/status/1')
+    def test_no_responsive_copy_can_drop_conflicting_links_media_quotes_or_parent(self):
+        prefix='<article><a href="/a/status/1">post</a><p>same body</p>'
+        cases=[
+            (prefix+'<a href="https://one.example/">https://one.example/</a></article>',prefix+'<a href="https://two.example/">https://two.example/</a></article>'),
+            (prefix+'<img src="https://pbs.twimg.com/one.jpg"></article>',prefix+'<img src="https://pbs.twimg.com/two.jpg"></article>'),
+            (prefix+'<a href="https://one.example/">https://one.example/</a></article>',prefix+'<article><a href="/b/status/2">quote</a>quoted body</article></article>'),
+            (prefix.replace('<article>','<article data-reply-to="9">')+'</article>',prefix.replace('<article>','<article data-reply-to="8">')+'</article>'),
+        ]
+        for first,second in cases:
+            with self.subTest(first=first,second=second):
+                with self.assertRaises(ValueError):select_target_article(BeautifulSoup(first+second,'html.parser'),'https://x.com/a/status/1')
+    def test_complete_copy_retains_quote_link_and_known_reply_parent(self):
+        plain='<article><a href="/a/status/1">post</a><p>same body</p></article>'
+        complete='<article data-reply-to="9"><a href="/a/status/1">post</a><p>same body</p><a href="https://example.edu/">https://example.edu/</a><article><a href="/b/status/2">quote</a>quoted body</article></article>'
+        for html in [plain+complete,complete+plain]:
+            selected=select_target_article(BeautifulSoup(html,'html.parser'),'https://x.com/a/status/1')
+            self.assertIn('quoted body',selected.get_text());self.assertIn('https://example.edu/',selected.get_text());self.assertEqual(selected['data-reply-to'],'9')
     def test_author_case_does_not_hide_requested_post(self):
         soup=BeautifulSoup('<article><a href="/ai_Goge/status/123">target</a>desired</article><article><a href="/ai_Goge/status/456">comment</a>wrong</article>','html.parser')
         self.assertIn('desired',select_target_article(soup,'https://x.com/ai_goge/status/123?s=46').get_text())

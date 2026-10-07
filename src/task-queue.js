@@ -12,6 +12,7 @@ export async function acquireQueueLease(directory,python){
  return async()=>{await new Promise(resolve=>{child.once('exit',resolve);child.stdin.end();});};
 }
 function waitingReason(message,attempts){
+ const httpStatuses=[...message.matchAll(/\bHTTP\b(?:\s+(?:error|status(?:\s+code)?))?\s*[:=]?\s*(401|402|403)\b/giu)].map(match=>match[1]);
  if(/Remote media waiting_login|Remote media HTTP 401|Remote media HTTP 403|Media service HTTP 401|Media service HTTP 403/iu.test(message))return 'waiting_remote_auth';
  if(/Remote media waiting_confirmation/iu.test(message))return 'waiting_remote_confirmation';
  if(/^(?:Remote media |Media service )/iu.test(message))return 'waiting_remote';
@@ -20,8 +21,8 @@ function waitingReason(message,attempts){
  if(/ASR backend unavailable|ASR backend version changed|ASR empty voiced|ASR suspected truncation|ASR retry budget exhausted|metadata retry budget exhausted|Download retry budget exhausted/iu.test(message))return 'waiting_asr';
  if(/Private or non-public|DNS resolution|Non-public DoH/iu.test(message))return 'waiting_network';
  if(/Unsupported source URL/iu.test(message))return 'waiting_input';
- if(/402|quota|capacity|额度/iu.test(message))return 'waiting_capacity';
- if(/401|403|login|captcha|验证码|登录/iu.test(message))return 'waiting_login';
+ if(httpStatuses.includes('402')||/quota|capacity|额度/iu.test(message))return 'waiting_capacity';
+ if(httpStatuses.some(code=>code==='401'||code==='403')||/login|captcha|验证码|登录/iu.test(message))return 'waiting_login';
  if(/Article extraction incomplete|extraction requires review/iu.test(message))return 'waiting_extraction';
  if(/Attachments incomplete|unsupported media/iu.test(message))return 'waiting_media';
  return attempts>=5?'waiting_retry':'retry';

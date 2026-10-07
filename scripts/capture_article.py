@@ -2,7 +2,6 @@
 """Capture one supported public URL. No account cookies or browser bypass."""
 import argparse
 import http.client
-import copy
 import json
 import subprocess
 import sys
@@ -13,9 +12,11 @@ import httpx
 from bs4 import BeautifulSoup
 from markdownify import markdownify
 try:
+    from .x_article import select_target_article
     from .media_download import extract_public, video_assets, direct_video_asset
     from .attachment_resume import atomic_json
 except ImportError:
+    from x_article import select_target_article
     from media_download import extract_public, video_assets, direct_video_asset
     from attachment_resume import atomic_json
 
@@ -27,37 +28,6 @@ def request(url, hosts, limit, dest):
     except ImportError:
         from attachment_resume import download
     download(url,dest,limit=limit)
-
-
-def select_target_article(soup, url):
-    target=urlsplit(url).path.rstrip('/').lower()
-    candidates=[]
-    for article in soup.select('article'):
-        owned=[a for a in article.select('a[href]') if a.find_parent('article') is article]
-        if any(urlsplit(a['href']).path.rstrip('/').lower()==target for a in owned):
-            candidates.append(article)
-    # Duplicate wrapper markup may contain the same target again. Keep the
-    # deepest matching target while retaining quotes inside it.
-    leaves=[a for a in candidates if not any(b is not a and any(p is a for p in b.parents) for b in candidates)]
-    def signature(a):
-        return (a.get_text(' ',strip=True),tuple((n.name,n.get('href'),n.get('src')) for n in a.select('a,img,video,source')))
-    leaves=list({signature(a):a for a in leaves}.values())
-    if len(leaves)>1:
-        # Responsive copies can show the same post with/without an embedded
-        # quote. Compare only the target's own content, then retain a variant
-        # containing every quote seen in the other equivalent copies.
-        def own_signature(a):
-            own=copy.copy(a)
-            for nested in own.select('article'):nested.decompose()
-            return signature(own)
-        if len({own_signature(a) for a in leaves})==1:
-            quote_sets=[{signature(q) for q in a.select('article')} for a in leaves]
-            union=set().union(*quote_sets)
-            complete=[a for a,quotes in zip(leaves,quote_sets) if quotes==union]
-            if complete:leaves=[complete[0]]
-    if len(leaves)!=1:
-        raise ValueError('Cannot identify the requested X post unambiguously')
-    return leaves[0]
 
 
 def wechat_video_pending(metadata, html):
