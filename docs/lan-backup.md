@@ -4,27 +4,31 @@
 
 ## 选择目标
 
-使用 Mini 上一个**专用备份目录**，目录必须已存在，路径每一层都需为真实目录，不得经过符号链接（例如 macOS 应使用 `/private/tmp` 而非 `/tmp`）。下面的 `/Volumes/Backup/wiki` 是示例，必须换成用户指定的真实目录。SSH 需要事先完成用户管理的密钥登录和主机身份验证；脚本会拒绝密码交互或未知主机密钥。不要把密码、私钥或登录资料写入命令和本仓库。
+使用 Mini 上一个**专用备份目录**，目录必须已存在，路径每一层都需为真实目录，不得经过符号链接（例如 macOS 应使用 `/private/tmp` 而非 `/tmp`）。用户已确认目录为 `/Users/mac/Backups/Personal-Wiki`，当前机器使用下面的独立密钥及远端 Python。SSH 需要事先完成用户管理的密钥登录和主机身份验证；脚本会拒绝密码交互或未知主机密钥。不要把密码、私钥或登录资料写入命令和本仓库。
 
 ```sh
 python3 scripts/wiki-backup.py backup \
   --vault /Users/mac/Documents/Personal-Wiki-Vault \
   --ssh mac@192.168.31.136 \
-  --repository /Volumes/Backup/wiki
+  --identity /Users/mac/.ssh/id_ed25519_wiki_backup \
+  --remote-python /opt/homebrew/opt/python@3.14/bin/python3.14 \
+  --repository /Users/mac/Backups/Personal-Wiki
 ```
 
 挂载 SMB 后可省略 `--ssh`，将 `--repository` 替换成本机已挂载共享盘中的专用目录。源和目标不可包含彼此。SMB 必须在实际共享盘验收原子重命名、fsync 和文件锁；不支持时应使用 SSH 到 Mini 本地磁盘。
 
 SSH 请求只传路径与备份资料到用户目标机器，不调用模型、不发送 Feishu、不重启 Gateway。源存在受保护写锁且忙时立即失败；可以在 Wiki 空闲时重试。nashsu 或 Obsidian 修改也会被全树变化检查拦截，长时间备份时应暂停编辑，减少重试。
 
+指定独立 SSH 密钥可加 `--identity /Users/mac/.ssh/id_ed25519_wiki_backup`（只把路径交给 SSH，不读取或记录私钥内容）。远端非交互 PATH 不一定包含 Homebrew，可加 `--remote-python /opt/homebrew/opt/python@3.14/bin/python3.14` 指定用户提供的解释器。备份、列表、核验与恢复均使用相同连接参数。
+
 ## 校验与恢复
 
 从成功 JSON 回执取 `snapshot`，将下面的 `SNAPSHOT_ID` 替换为该值：
 
 ```sh
-python3 scripts/wiki-backup.py list --ssh mac@192.168.31.136 --repository /Volumes/Backup/wiki
-python3 scripts/wiki-backup.py verify --ssh mac@192.168.31.136 --repository /Volumes/Backup/wiki --snapshot SNAPSHOT_ID
-python3 scripts/wiki-backup.py restore --ssh mac@192.168.31.136 --repository /Volumes/Backup/wiki --snapshot SNAPSHOT_ID --destination /Users/mac/Documents/Wiki-Restore-Check
+python3 scripts/wiki-backup.py list --ssh mac@192.168.31.136 --identity /Users/mac/.ssh/id_ed25519_wiki_backup --remote-python /opt/homebrew/opt/python@3.14/bin/python3.14 --repository /Users/mac/Backups/Personal-Wiki
+python3 scripts/wiki-backup.py verify --ssh mac@192.168.31.136 --identity /Users/mac/.ssh/id_ed25519_wiki_backup --remote-python /opt/homebrew/opt/python@3.14/bin/python3.14 --repository /Users/mac/Backups/Personal-Wiki --snapshot SNAPSHOT_ID
+python3 scripts/wiki-backup.py restore --ssh mac@192.168.31.136 --identity /Users/mac/.ssh/id_ed25519_wiki_backup --remote-python /opt/homebrew/opt/python@3.14/bin/python3.14 --repository /Users/mac/Backups/Personal-Wiki --snapshot SNAPSHOT_ID --destination /Users/mac/Documents/Wiki-Restore-Check
 ```
 
 恢复目录必须不存在，其父目录必须存在。不能填写当前 Vault，也不能恢复到本机备份仓库内部。恢复结果逐文件校验后才以新目录出现；不启用 nashsu、不重放任务。接管到生产 Vault 属于后续人工确认的恢复步骤。
@@ -42,4 +46,4 @@ python3 scripts/wiki-backup.py restore --ssh mac@192.168.31.136 --repository /Vo
 
 v1 **不包含**运行账户/浏览器/宿主凭据，不保存 POSIX 元数据、扩展属性及 Finder 标签；文件恢复为 0600、目录为 0700。Mini 上远程视频不因本机备份而获得第二份媒体副本。不同版本为完整数据副本，没有跨版本空间去重、自动删除或自动定时。
 
-本机隔离验收见 [报告](research/lan-backup-acceptance-2026-10-07.md)。真实 Mini 验收必须有目标端核验和恢复比对；当前未取得用户目标目录，不能宣称已完成真实备份。
+本机隔离与真实 Mini 验收见 [报告](research/lan-backup-acceptance-2026-10-07.md)。真实验收须同时有目标端核验和隔离恢复比对；连接配置完成不能替代这些证据。

@@ -205,6 +205,28 @@ class BackupAcceptance(unittest.TestCase):
         self.cli('restore', '--repository', self.repo, '--snapshot', result['snapshot'], '--destination', destination, '--ssh', 'mac@mini-test')
         self.assertEqual((destination / 'raw/large.bin').stat().st_size, 1260000)
 
+    def test_selected_identity_and_remote_python_are_used_for_backup_and_restore(self):
+        import os
+        bin_dir = self.base / 'selected-bin'
+        bin_dir.mkdir()
+        identity = self.base / 'synthetic-key'
+        identity.write_text('Synthetic system-boundary fixture; never a real key')
+        interpreter = self.base / 'remote python'
+        interpreter.write_text('#!' + sys.executable + '\nimport os,sys\nos.execv(' + repr(sys.executable) + ',[' + repr(sys.executable) + ']+sys.argv[1:])\n')
+        interpreter.chmod(0o700)
+        ssh = bin_dir / 'ssh'
+        ssh.write_text('#!' + sys.executable + '\nimport os,sys\na=sys.argv[1:]\nassert a[a.index("-i")+1] == ' + repr(str(identity)) + '\nassert "IdentitiesOnly=yes" in a\nos.execl("/bin/sh","sh","-c",a[-1])\n')
+        ssh.chmod(0o700)
+        old = os.environ.get('PATH', '')
+        os.environ['PATH'] = str(bin_dir) + os.pathsep + old
+        self.addCleanup(os.environ.__setitem__, 'PATH', old)
+        flags = ['--repository', self.repo, '--ssh', 'mac@mini-test', '--identity', identity, '--remote-python', interpreter]
+        result = self.cli('backup', '--vault', self.vault, *flags)
+        self.cli('verify', '--snapshot', result['snapshot'], *flags)
+        destination = self.base / 'selected-restored'
+        self.cli('restore', '--snapshot', result['snapshot'], '--destination', destination, *flags)
+        self.assertEqual((destination / 'raw/原件.txt').read_text(), '原文，不可覆盖\n')
+
 
 if __name__ == '__main__':
     unittest.main()

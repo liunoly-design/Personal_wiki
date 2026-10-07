@@ -428,18 +428,24 @@ def transport_cause(diagnostics, code):
 
 class Endpoint:
     """Same repository protocol for mounted storage and an SSH Python process."""
-    def __init__(self, target, ssh=None):
+    def __init__(self, target, ssh=None, identity=None, remote_python='python3'):
         self.ssh = ssh
         self.target = str(Path(target).absolute()) if not ssh else target
         if not self.target.startswith('/'):
             raise ValueError('Repository must be an absolute path')
         if ssh and not re.fullmatch(r'[a-zA-Z0-9_][a-zA-Z0-9_.@-]*', ssh):
             raise ValueError('Invalid SSH host; use user@host or an SSH alias')
+        if not ssh and (identity or remote_python != 'python3'):
+            raise ValueError('Identity and remote Python options require --ssh')
+        if remote_python != 'python3' and not remote_python.startswith('/'):
+            raise ValueError('Remote Python must be python3 or an absolute executable path')
         if ssh:
             code = Path(__file__).read_text()
             self.command = ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-                            '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2',
-                            '--', ssh, 'python3 -c ' + shlex.quote(code) + ' --serve']
+                            '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2']
+            if identity:
+                self.command.extend(['-i', str(Path(identity).absolute()), '-o', 'IdentitiesOnly=yes'])
+            self.command.extend(['--', ssh, shlex.quote(remote_python) + ' -c ' + shlex.quote(code) + ' --serve'])
         else:
             self.command = [sys.executable, str(Path(__file__).absolute()), '--serve']
 
@@ -620,8 +626,10 @@ def main():
     parser.add_argument('--snapshot')
     parser.add_argument('--destination')
     parser.add_argument('--ssh', help='Mac mini user@host or existing SSH alias; no interactive password prompts')
+    parser.add_argument('--identity', help='Dedicated SSH private-key file; passed to SSH without reading its contents')
+    parser.add_argument('--remote-python', default='python3', help='Remote Python executable; python3 or an absolute path')
     args = parser.parse_args()
-    endpoint = Endpoint(args.repository, args.ssh)
+    endpoint = Endpoint(args.repository, args.ssh, args.identity, args.remote_python)
     if args.command == 'backup':
         if not args.vault:
             parser.error('backup requires --vault')

@@ -1,6 +1,6 @@
 # 个人 Wiki / Personal Wiki
 
-2026-10-07：新增[局域网 Vault 备份与隔离恢复](docs/lan-backup.md)。支持挂载目录或现有 SSH 的不可变快照、目标哈希核验、缺失文件续传及恢复禁止覆盖；[SPEC](docs/specs/lan-backup.md)。Mac mini 的实际备份目录尚待用户指定，隔离测试不能代替实机验收。
+2026-10-07：新增[局域网 Vault 备份与隔离恢复](docs/lan-backup.md)。支持挂载目录或现有 SSH 的不可变快照、目标哈希核验、缺失文件续传及恢复禁止覆盖；[SPEC](docs/specs/lan-backup.md)。已真实备份到 Mac mini `/Users/mac/Backups/Personal-Wiki`，1066 文件约375 MB；目标哈希核验、隔离恢复与原 Vault 完整比对通过，重复备份复用同一快照。见[真实验收记录](docs/research/lan-backup-acceptance-2026-10-07.md)，当前为手动版本。
 
 2026-10-06：新增[独立安装、自检与配置回退入口](docs/independent-install.md)，[隔离验收报告](docs/research/independent-install-acceptance-2026-10-06.md)。支持自己的库、私有状态、账号范围与模型Agent，不依赖PGTD/Apple。真实OpenClaw CLI隔离安装/加载/重复/回退及校验失败保护通过；这是工具源码交付，不代表正式网关升级、新Mac或真实账号验收。
 
