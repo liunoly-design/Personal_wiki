@@ -4,6 +4,17 @@ from unittest.mock import patch
 from scripts.capture_article import capture
 
 class XContextTest(unittest.TestCase):
+ def test_nested_quote_relationship_survives_duplicate_order(self):
+  marked='<article><a href="/a/status/1">post</a><p>目标正文</p><article><a href="/b/status/9">post</a><p>嵌套引用正文</p><a data-quote href="/c/status/8">深层引用</a></article></article>'
+  unmarked=marked.replace(' data-quote','')
+  for html in [marked+unmarked,unmarked+marked]:
+   def request(url,hosts,limit,dest):
+    if url=='https://x.com/a/status/1':dest.write_text(html)
+    elif url=='https://x.com/c/status/8':dest.write_text('<article><a href="/c/status/8">post</a><p>深层引用正文</p></article>')
+    else:raise ValueError('Unexpected request')
+   with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request),patch('scripts.capture_article.extract_public',side_effect=AssertionError('Unexpected fallback')):
+    result=capture('https://x.com/a/status/1',temp);body=(Path(result['directory'])/'article.md').read_text()
+    self.assertIn('嵌套引用正文',body);self.assertIn('深层引用正文',body)
  def test_quote_relationship_survives_duplicate_order(self):
   marked='<article><a href="/a/status/1">post</a><p>目标正文</p><a data-quote href="/b/status/9">引用</a></article>'
   unmarked=marked.replace(' data-quote','')
