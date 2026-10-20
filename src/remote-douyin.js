@@ -30,6 +30,7 @@ function chineseTranscript(markdown,manifest){
 async function privateDirectory(path){await mkdir(path,{recursive:true,mode:0o700});for(let p=path;;p=dirname(p)){if(!(await lstat(p)).isDirectory())throw Error('Remote media state must be a regular directory');if(p===dirname(p))break;}}
 export async function collectRemoteDouyin(options,collect) {
  const {url,vault,python,signal,onStage=async()=>{}}=options;
+ if(options.videoMode==='original')throw Error('Remote media original mode unsupported by v1; explicit local T1 processing or a service upgrade required');
  if(options.refresh)throw Error('Remote media refresh unsupported; request service-side reprocessing first');
  if(!isAbsolute(options.mediaServiceTokenFile??''))throw Error('Remote media credential file must be absolute');
  const tokenStat=await lstat(options.mediaServiceTokenFile);

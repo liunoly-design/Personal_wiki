@@ -70,3 +70,7 @@ test('authenticated Feishu share passes remote settings and reports remote authe
   message.sender.id='forged';await assert.rejects(runtime.acceptMessage(scope,'om_share'),/Source mismatch/);
  }finally{await runtime.close();}
 });
+
+test('remote v1 rejects original mode before credentials or submission instead of silently losing it',async()=>{
+ await assert.rejects(collectCanonical({url:'https://v.douyin.com/Synthetic/',videoMode:'original',mediaServiceUrl:'http://127.0.0.1:8765'}),/original.*unsupported/u);
+});

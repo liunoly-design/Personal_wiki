@@ -6,6 +6,9 @@ import json
 import os
 import re
 import subprocess
+import shutil
+import stat
+import tempfile
 from pathlib import Path
 from urllib.parse import urljoin
 try:
@@ -14,14 +17,21 @@ except ImportError:
     from blog_capture import public_addresses, PinnedHTTPS
 LIMIT=1000000000
 
-class ConfirmationRequired(ValueError):pass
+class ConfirmationRequired(ValueError):
+    def __init__(self,message,expected_size=None):
+        super().__init__(message)
+        self.expected_size=expected_size
 
 
 def atomic_json(path,value):
-    temporary=path.with_suffix(path.suffix+'.tmp')
-    with temporary.open('w') as f:
-        json.dump(value,f,ensure_ascii=False,indent=2);f.flush();os.fsync(f.fileno())
-    temporary.replace(path)
+    if path.is_symlink():raise ValueError('State symlink rejected')
+    fd,name=tempfile.mkstemp(prefix=path.name+'.',suffix='.tmp',dir=path.parent)
+    temporary=Path(name)
+    try:
+        with os.fdopen(fd,'w') as f:
+            json.dump(value,f,ensure_ascii=False,indent=2);f.flush();os.fsync(f.fileno())
+        temporary.replace(path)
+    finally:temporary.unlink(missing_ok=True)
     directory=os.open(path.parent,os.O_RDONLY)
     try:os.fsync(directory)
     finally:os.close(directory)
@@ -47,9 +57,15 @@ def safe_destination(directory,relative):
     return dest
 
 
-def download(url,dest,limit=LIMIT,approved=False,validate_url=None,resolve_addresses=public_addresses):
+def download(url,dest,limit=LIMIT,approved=False,validate_url=None,resolve_addresses=None,approved_limit=None):
     """Single network attempt. Range resumes only with an exact strong validator."""
+    resolve_addresses=resolve_addresses or public_addresses
+    if approved_limit is not None and (type(approved_limit) is not int or approved_limit<=0):raise ValueError('Invalid approved byte scope')
+    cap=approved_limit if approved else limit
     partial=dest.with_suffix(dest.suffix+'.part');progress=partial.with_suffix(partial.suffix+'.json')
+    for path in (dest,partial,progress):
+        safe_destination(dest.parent,path.name)
+        if path.exists() and not stat.S_ISREG(path.lstat().st_mode):raise ValueError('Download path must be a regular file')
     current=url
     for _ in range(6):
         if validate_url:validate_url(current)
@@ -67,27 +83,37 @@ def download(url,dest,limit=LIMIT,approved=False,validate_url=None,resolve_addre
             if response.status not in (200,206):raise OSError('HTTP '+str(response.status))
             validator=response.getheader('ETag')
             if validator and validator.startswith('W/'):validator=None
+            total=None;range_length=None
             if offset and response.status==206:
                 match=re.fullmatch(r'bytes (\d+)-(\d+)/(\d+|\*)',response.getheader('Content-Range') or '')
-                if not match or int(match[1])!=offset or validator!=old['validator']:
+                if not match or int(match[1])!=offset or int(match[2])<offset or match[3]=='*' or int(match[2])>=int(match[3]) or validator!=old['validator']:
                     progress.unlink(missing_ok=True)
                     raise ValueError('Unsafe partial response; validator/range changed; next attempt restarts this attachment')
+                total=int(match[3]);range_length=int(match[2])-offset+1
             elif response.status==206:raise ValueError('Unexpected partial response')
             else:offset=0
             length=int(response.getheader('Content-Length') or 0)
-            if length and length+offset>limit and not approved:raise ConfirmationRequired('Estimated download exceeds 1 GB; confirmation required')
+            if length<0 or (range_length is not None and length and length!=range_length):raise ValueError('Unsafe partial response length')
+            expected=total or (length+offset if length else None)
+            if expected is not None and ((not approved and expected>=limit) or (cap is not None and expected>cap)):
+                raise ConfirmationRequired('Download exceeds approved byte scope; confirmation required',expected)
+            if cap is not None and offset>cap:raise ConfirmationRequired('Retained download exceeds approved byte scope; confirmation required',expected)
             atomic_json(progress,dict(url=current,validator=validator))
             with partial.open('ab' if offset else 'wb') as f:
                 size=offset
                 while True:
-                    remaining=65536 if approved else min(65536,limit-size)
-                    if remaining<=0:raise ConfirmationRequired('Download reached 1 GB; confirmation required')
+                    remaining=65536 if cap is None else min(65536,cap-size)
+                    if remaining<=0:
+                        if approved and not response.read(1):break
+                        raise ConfirmationRequired('Download reached byte scope; confirmation required; unknown total needs a finite allowance',expected)
                     block=response.read(remaining)
                     if not block:break
+                    if shutil.disk_usage(dest.parent).free<len(block)+64*1024*1024:raise OSError('Insufficient disk space; materials retained')
                     f.write(block);size+=len(block);f.flush()
                     if not approved and size>=limit:raise ConfirmationRequired('Download reached 1 GB; confirmation required')
                 os.fsync(f.fileno())
             if length and size-offset!=length:raise OSError('Incomplete attachment response')
+            if total is not None and (size!=total or size-offset!=range_length):raise OSError('Incomplete attachment range; continue from retained bytes')
             partial.replace(dest);progress.unlink(missing_ok=True);return
         finally:connection.close()
     raise ValueError('Too many redirects')

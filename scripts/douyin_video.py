@@ -14,17 +14,20 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urljoin, unquote
 try:
-    from .attachment_resume import atomic_json, download, safe_destination
+    from .attachment_resume import atomic_json, download, safe_destination, ConfirmationRequired
     from .blog_capture import public_addresses, PinnedHTTPS
 except ImportError:
-    from attachment_resume import atomic_json, download, safe_destination
+    from attachment_resume import atomic_json, download, safe_destination, ConfirmationRequired
     from blog_capture import public_addresses, PinnedHTTPS
 
 VERSION='douyin-v1-aac128-x264-crf28'
 ASR_VERSION='codex-asr-0.1.2'
 LIMIT=1_000_000_000
+MAX_DURATION_SECONDS=1800
 PAGE_HOSTS={'v.douyin.com','www.douyin.com','douyin.com','www.iesdouyin.com','iesdouyin.com'}
 MEDIA_SUFFIXES=('douyinvod.com','douyin.com','bytecdn.cn','ibytedtos.com','byteimg.com','pstatp.com')
+# Do not let downloaded bytes select a playlist demuxer or follow external tracks.
+MP4_INPUT=['-protocol_whitelist','file','-f','mov','-enable_drefs','0','-use_absolute_path','0']
 
 
 def sha(path):
@@ -88,11 +91,13 @@ def fetch_page(url):
 
 def metadata(url,fetch=fetch_page):
     url=source_url(url);final,html=fetch(url)
-    match=re.search(r'/(?:share/)?video/([0-9]{10,24})',urlsplit(final).path)
+    source_url(final)
+    match=re.fullmatch(r'/(?:share/)?video/([0-9]{10,24})/?',urlsplit(final).path)
     if not match:raise ValueError('Unsupported source URL: redirect is not a single video')
     vid=match[1]
     # Public mobile HTML embeds the same platform aweme data; no signature/cookie bypass.
-    _,html=fetch('https://www.iesdouyin.com/share/video/'+vid+'/')
+    resolved,html=fetch('https://www.iesdouyin.com/share/video/'+vid+'/')
+    if source_url(resolved)!='https://www.douyin.com/video/'+vid:raise ValueError('Redirect video identity mismatch')
     candidates=[]
     for pattern in [r'window\._ROUTER_DATA\s*=\s*(\{.*?\})\s*</script>',r'<script[^>]*id="RENDER_DATA"[^>]*>(.*?)</script>']:
         m=re.search(pattern,html,re.S)
@@ -138,8 +143,8 @@ def run_media(args,timeout=3600):
     return p.stderr
 
 
-def media_probe(path,video=True):
-    result=subprocess.run([ffmpeg(),'-nostdin','-hide_banner','-i',str(path)],capture_output=True,text=True,timeout=30)
+def media_probe(path,video=True,decode=True):
+    result=subprocess.run([ffmpeg(),'-nostdin','-hide_banner',*MP4_INPUT,'-i',str(path)],capture_output=True,text=True,timeout=30)
     output=result.stderr
     t=re.search(r'Duration: (\d+):(\d+):([\d.]+)',output)
     if not t:raise ValueError('Damaged media: duration unavailable')
@@ -151,7 +156,7 @@ def media_probe(path,video=True):
         info.update(width=int(dims[1]),height=int(dims[2]))
         fps=re.search(r'([\d.]+) fps',output);info['fps']=float(fps[1]) if fps else None
         rot=re.search(r'rotation of ([\d.-]+)',output);info['rotation']=float(rot[1]) if rot else 0
-    run_media(['-v','error','-i',str(path),'-map','0:v?' if video else '0:a','-map','0:a','-f','null','-'])
+    if decode:run_media(['-v','error','-xerror','-err_detect','explode',*MP4_INPUT,'-i',str(path),'-map','0:v?' if video else '0:a','-map','0:a','-f','null','-'])
     return info
 
 
@@ -167,35 +172,82 @@ def freeze_file(root,path):
     return dict(path=relative,sha256=sha(path),device=st.st_dev,inode=st.st_ino,bytes=st.st_size)
 
 
+def freeze_mode(root,mode):
+    if mode not in ('compressed','original'):raise ValueError('Invalid video mode')
+    config=dict(mode=mode,version=VERSION)
+    path=safe_destination(root,'media-config.json');prior=load(path)
+    if prior and prior!=config:raise ValueError('Media mode/config changed; create a new version')
+    if not prior:atomic_json(path,config)
+
+
+def media_product(root,name,create,validate,video=True):
+    """Checkpoint verified bytes before promotion; restart reconciles either path."""
+    target=safe_destination(root,'package/'+name)
+    temporary=safe_destination(root,'work-'+name)
+    receipt=safe_destination(root,name+'.stage.json')
+    saved=load(receipt)
+    if saved:
+        actual=target if target.exists() else temporary
+        if not actual.is_file() or sha(actual)!=saved['sha256']:raise ValueError('Media stage integrity mismatch; materials retained')
+        validate(saved)
+    else:
+        create(temporary)
+        saved=media_probe(temporary,video);validate(saved)
+        if target.exists():
+            # Pre-checkpoint releases could promote a complete output before crashing.
+            # Reuse it only if reconstruction from this frozen source/config is exact.
+            if sha(target)!=saved['sha256']:raise ValueError('Unverified media differs from source/config; retain files and use a separate work directory for repair')
+            with target.open('rb') as f:os.fsync(f.fileno())
+            fd=os.open(target.parent,os.O_RDONLY)
+            try:os.fsync(fd)
+            finally:os.close(fd)
+        with temporary.open('rb') as f:os.fsync(f.fileno())
+        atomic_json(receipt,saved)
+        if target.exists():temporary.unlink()
+    if not target.exists():
+        temporary.replace(target)
+        fd=os.open(target.parent,os.O_RDONLY)
+        try:os.fsync(fd)
+        finally:os.close(fd)
+    return dict(path=name,**saved)
+
+
 def prepare_media(root,source,mode):
     root=Path(root);source=Path(source);safe_destination(root,str(source.relative_to(root)));package=safe_destination(root,'package/video.mp4').parent;package.mkdir(exist_ok=True)
+    freeze_mode(root,mode)
     prior=load(root/'media.json')
     if prior:
         if prior['mode']!=mode or prior['version']!=VERSION:raise ValueError('Media config changed; create a new version')
         for key in ['video','audio']:
             path=safe_destination(package,prior[key]['path'])
             if sha(path)!=prior[key]['sha256']:raise ValueError('Formal media integrity mismatch')
+        if source.exists() and sha(source)!=prior['source']['sha256']:raise ValueError('Source integrity mismatch; materials retained')
+        if mode=='original' and prior['video']['sha256']!=prior['source']['sha256']:raise ValueError('Original source bytes mismatch')
         return prior
-    if mode not in ('compressed','original'):raise ValueError('Invalid video mode')
     info=media_probe(source)
     if min(info['width'],info['height'])>1080:raise ValueError('Video exceeds 1080p')
+    encoder=subprocess.run([ffmpeg(),'-version'],capture_output=True,text=True,check=True).stdout.splitlines()[0]
+    work=dict(source=info,mode=mode,version=VERSION,encoder=encoder)
+    work_path=safe_destination(root,'media-work.json');frozen=load(work_path)
+    if frozen and frozen!=work:raise ValueError('Media source/config/encoder changed; create a new version')
+    if not frozen:atomic_json(work_path,work)
     if shutil.disk_usage(root).free<max(64*1024*1024,info['bytes']*2+info['duration']*32000):raise ValueError('Insufficient disk space; materials retained')
-    audio=safe_destination(root,'package/audio.m4a');video=safe_destination(root,'package/video.mp4')
     # Extract complete audio from the verified source before any video conversion.
-    if not audio.exists():
-        tmp=safe_destination(root,'audio.tmp.m4a');run_media(['-v','error','-i',str(source),'-vn','-c:a','aac','-b:a','128k',str(tmp),'-y']);tmp.replace(audio)
-    a=media_probe(audio,False)
-    if abs(a['duration']-info['duration'])>.25:raise ValueError('Incomplete audio duration')
-    if not video.exists():
-        if mode=='original':shutil.copyfile(source,video)
+    def validate_audio(a):
+        if abs(a['duration']-info['duration'])>.25:raise ValueError('Incomplete audio duration')
+    a=media_product(root,'audio.m4a',
+        lambda tmp:run_media(['-v','error','-xerror',*MP4_INPUT,'-i',str(source),'-vn','-c:a','aac','-b:a','128k',str(tmp),'-y']),validate_audio,False)
+    def create_video(tmp):
+        if mode=='original':shutil.copyfile(source,tmp)
         else:
-            tmp=safe_destination(root,'video.tmp.mp4')
             scale="scale=w='trunc(iw*min(1,720/min(iw,ih))/2)*2':h='trunc(ih*min(1,720/min(iw,ih))/2)*2'"
-            run_media(['-v','error','-i',str(source),'-vf',scale,'-c:v','libx264','-crf','28','-preset','medium','-c:a','aac','-b:a','128k','-movflags','+faststart',str(tmp),'-y']);tmp.replace(video)
-    v=media_probe(video)
-    if abs(v['duration']-info['duration'])>.25:raise ValueError('Incomplete archive video')
-    if mode=='compressed' and (min(v['width'],v['height'])>720 or v['bytes']>=info['bytes']):raise ValueError('Compression did not save bytes or exceeds 720p; retained')
-    result=dict(mode=mode,version=VERSION,encoder=subprocess.run([ffmpeg(),'-version'],capture_output=True,text=True,check=True).stdout.splitlines()[0],source=info,video=dict(path='video.mp4',**v),audio=dict(path='audio.m4a',**a))
+            run_media(['-v','error','-xerror',*MP4_INPUT,'-i',str(source),'-vf',scale,'-c:v','libx264','-crf','28','-preset','medium','-c:a','aac','-b:a','128k','-movflags','+faststart',str(tmp),'-y'])
+    def validate_video(v):
+        if abs(v['duration']-info['duration'])>.25:raise ValueError('Incomplete archive video')
+        if mode=='original' and v['sha256']!=info['sha256']:raise ValueError('Original source bytes mismatch')
+        if mode=='compressed' and (min(v['width'],v['height'])>min(720,info['width'],info['height']) or v['bytes']>=info['bytes']):raise ValueError('Compression did not save bytes or exceeds 720p; retained')
+    v=media_product(root,'video.mp4',create_video,validate_video)
+    result=dict(mode=mode,version=VERSION,encoder=encoder,source=info,video=v,audio=a)
     atomic_json(root/'media.json',result)
     if mode=='compressed':atomic_json(root/'cleanup.json',dict(version=1,files=[freeze_file(root,source)],deleted=[]))
     return result
@@ -203,12 +255,15 @@ def prepare_media(root,source,mode):
 
 def acquire_media(url,root,mode,meta=None,approved=False,fetch_metadata=metadata,download_stream=download):
     root=Path(root);root.mkdir(parents=True,exist_ok=True)
+    freeze_mode(root,mode)
     requested=meta
     saved=load(root/'metadata.json')
+    source_url(url)
+    if saved and requested and any(saved.get(k)!=requested.get(k) for k in ('id','url')):raise ValueError('Frozen video identity mismatch')
     if approved and saved and any((requested or {}).get(k)!=saved.get(k) for k in ('id','url','duration','width','height','expected_size')):approved=False
     meta=saved or meta or fetch_metadata(url)
     atomic_json(root/'metadata.json',meta)
-    if (meta['duration']>1800 or (meta.get('expected_size') or 0)>=LIMIT) and not approved:raise ValueError('Video confirmation required: exceeds 30 minutes or 1 GB')
+    if (meta['duration']>MAX_DURATION_SECONDS or (meta.get('expected_size') or 0)>=LIMIT) and not approved:raise ValueError('Video confirmation required: exceeds 30 minutes or 1 GB')
     estimate=meta.get('expected_size') or LIMIT
     if shutil.disk_usage(root).free<estimate*3+meta['duration']*32000:raise ValueError('Insufficient disk space; materials retained')
     source=safe_destination(root,'download.mp4')
@@ -216,7 +271,11 @@ def acquire_media(url,root,mode,meta=None,approved=False,fetch_metadata=metadata
         state=load(root/'download-state.json') or dict(attempts=0,refreshes=0)
         if state['attempts']>=5:raise ValueError('Download retry budget exhausted; materials retained')
         state['attempts']+=1;atomic_json(root/'download-state.json',state)
-        try:download_stream(meta['media_url'],source,approved=approved,validate_url=lambda u:check_url(u,True),resolve_addresses=douyin_addresses)
+        try:download_stream(meta['media_url'],source,approved=approved,approved_limit=meta.get('expected_size') or LIMIT,validate_url=lambda u:check_url(u,True),resolve_addresses=douyin_addresses)
+        except ConfirmationRequired as error:
+            if error.expected_size is not None:
+                meta={**meta,'expected_size':error.expected_size};atomic_json(root/'metadata.json',meta)
+            raise
         except (ValueError,OSError) as error:
             if re.search(r'HTTP (?:401|403|404|410)',str(error)):
                 if state['refreshes']>=5:raise ValueError('Douyin metadata retry budget exhausted')
@@ -226,8 +285,15 @@ def acquire_media(url,root,mode,meta=None,approved=False,fetch_metadata=metadata
                 atomic_json(root/'metadata.json',fresh)
                 raise OSError('Media address refreshed under verified video identity; continue bounded retry')
             raise
+    actual=media_probe(source,decode=False)
+    if min(actual['width'],actual['height'])>1080:raise ValueError('Video exceeds 1080p')
+    duration_changed=abs(actual['duration']-meta['duration'])>1
+    outside_size_scope=actual['bytes']>(meta.get('expected_size') or LIMIT)
+    if (actual['duration']>MAX_DURATION_SECONDS and (not approved or duration_changed)) or (actual['bytes']>=LIMIT and not approved) or (approved and outside_size_scope):
+        meta={**meta,'duration':actual['duration'],'expected_size':actual['bytes']};atomic_json(root/'metadata.json',meta)
+        raise ValueError('Video confirmation required: actual duration/size exceeds approved scope')
+    if duration_changed:raise ValueError('Downloaded source duration mismatch')
     result=prepare_media(root,source,mode)
-    if result['source']['duration']>1800 and not approved:raise ValueError('Video confirmation required: actual duration exceeds 30 minutes')
     if abs(result['source']['duration']-meta['duration'])>1:raise ValueError('Downloaded source duration mismatch')
     return dict(metadata=meta,**result)
 

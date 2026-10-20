@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "plugin:validate": "node scripts/check-plugin.js"
+    "plugin:validate": "node scripts/check-plugin.js",
+    "test:t1": "node scripts/test-douyin-t1.mjs"
   },
   "openclaw": {
     "extensions": [
