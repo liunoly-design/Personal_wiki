@@ -23,7 +23,7 @@ class DouyinMediaTests(unittest.TestCase):
             subprocess.run([ffmpeg(),'-v','error','-f','lavfi','-i','testsrc2=size=320x240:rate=10','-f','lavfi','-i','sine','-t','2','-c:v','libx264','-crf','10','-c:a','aac',str(source)],check=True)
             prepare_media(root,source,'compressed')
             with self.assertRaisesRegex(ValueError,'verification'):clean_verified(root)
-            original=source.read_bytes();source.unlink();source.write_bytes(original)
+            original=source.read_bytes();source.rename(root/'retained-original.mp4');source.write_bytes(original)
             with self.assertRaisesRegex(ValueError,'identity'):clean_verified(root,True)
             self.assertTrue((root/'package/video.mp4').exists())
 

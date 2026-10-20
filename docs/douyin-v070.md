@@ -1,5 +1,7 @@
 # 0.7.0 Douyin usage and recovery
 
+2026-10-20 T1 recovery hardening and offline test command: [verification report](research/douyin-t1-2026-10-20.md). Run `npm run test:t1`; no platform access, credentials or ASR required.
+
 Historical local candidate. Current remote implementation and deployment status: [0.7.1](douyin-v071.md). [Acceptance and limits](research/v0.7.0-acceptance-2026-10-04.md). The original 0.7.0 authorization was implementation-only; the later user request explicitly authorizes remote 0.7.1 deployment.
 
 After separately authorized deployment, the existing explicit commands are:
