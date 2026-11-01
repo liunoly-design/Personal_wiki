@@ -1,5 +1,7 @@
 # 个人 Wiki / Personal Wiki
 
+2026-11-01 新部署方向：dots 连接 Mac mini，Mini 同机运行 LLM Wiki、主库和受保护处理程序。请先读 [给 dots 的接管说明](docs/handoffs/dots-mac-mini-wiki.md) 与 [更新后的架构](架构与数据.md)。当前已迁入数据和代码，尚未完成 LLM Wiki 注册、内容 skill 和生产切换；下方旧版本安装说明保留为历史。
+
 2026-10-04：0.7.0 抖音实现候选已本地开发，[使用与恢复](docs/douyin-v070.md)、[验收报告](docs/research/v0.7.0-acceptance-2026-10-04.md)。指定抖音公开下载受限；真实该来源发布/查询/飞书回执未完成，未部署生产。60秒分段云ASR已做非私人合成语音长音频试验；不能替代自然语音人工参考验收。
 
 0.6.2 同议题持续记录：明确保存默认追加同一文档，显式新记录才另建；原回复保真、稳定D/K、历史与未知结果恢复。见[使用与验收](docs/v0.6.2-usage.md)、[SPEC](docs/specs/v0.6.2-continuous-topic.md)、[实际交付证据](docs/research/v0.6.2-acceptance-2026-10-03.md)。真实飞书体验仍需用户发起验收。
