@@ -38,19 +38,19 @@ class AttachmentResumeTest(unittest.TestCase):
    def request(self,*args,**kwargs):requests.append(kwargs.get('headers',{}))
    def getresponse(self):return responses.pop(0)
    def close(self):pass
-  with tempfile.TemporaryDirectory() as temp,patch('scripts.attachment_resume.public_addresses',return_value=(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit('https://video.twimg.com/a.mp4'),['8.8.8.8'])),patch('scripts.attachment_resume.PinnedHTTPS',Connection):
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.attachment_resume.public_addresses',return_value=(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit('https://video.twimg.com/a.mp4'),['8.8.8.8'])) as resolver,patch('scripts.attachment_resume.PinnedHTTPS',Connection):
    dest=Path(temp)/'video.mp4';responses.append(Response(200,b'abcdefghij',{'ETag':'"same"'}))
-   with self.assertRaises(ConfirmationRequired):download('https://video.twimg.com/a.mp4',dest,limit=5)
+   with self.assertRaises(ConfirmationRequired):download('https://video.twimg.com/a.mp4',dest,limit=5,resolve_addresses=resolver)
    self.assertFalse(dest.exists());self.assertEqual(dest.with_suffix('.mp4.part').read_bytes(),b'abcde')
-   responses.append(Response(206,b'fghij',{'ETag':'"same"','Content-Range':'bytes 5-9/10','Content-Length':'5'}));download('https://video.twimg.com/a.mp4',dest,limit=5,approved=True)
+   responses.append(Response(206,b'fghij',{'ETag':'"same"','Content-Range':'bytes 5-9/10','Content-Length':'5'}));download('https://video.twimg.com/a.mp4',dest,limit=5,approved=True,resolve_addresses=resolver)
    self.assertEqual(dest.read_bytes(),b'abcdefghij');self.assertEqual(requests[-1]['Range'],'bytes=5-')
  def test_preflight_length_stops_before_body_and_changed_validator_cannot_append(self):
   from scripts.attachment_resume import download, ConfirmationRequired
   import io
   response=type('Response',(),{'status':200,'getheader':lambda self,k:{'Content-Length':'11'}.get(k),'read':lambda self,n:(_ for _ in ()).throw(AssertionError('body read before confirmation'))})()
   connection=type('Connection',(),{'request':lambda *args,**kwargs:None,'getresponse':lambda self:response,'close':lambda self:None})()
-  with tempfile.TemporaryDirectory() as temp,patch('scripts.attachment_resume.public_addresses',return_value=(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit('https://video.twimg.com/a.mp4'),['8.8.8.8'])),patch('scripts.attachment_resume.PinnedHTTPS',return_value=connection):
-   with self.assertRaises(ConfirmationRequired):download('https://video.twimg.com/a.mp4',Path(temp)/'video.mp4',limit=10)
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.attachment_resume.public_addresses',return_value=(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit('https://video.twimg.com/a.mp4'),['8.8.8.8'])) as resolver,patch('scripts.attachment_resume.PinnedHTTPS',return_value=connection):
+   with self.assertRaises(ConfirmationRequired):download('https://video.twimg.com/a.mp4',Path(temp)/'video.mp4',limit=10,resolve_addresses=resolver)
 
  def test_failed_video_metadata_can_recover_without_fetching_article(self):
   from scripts.attachment_resume import resume_assets,identify
@@ -74,10 +74,10 @@ class AttachmentResumeTest(unittest.TestCase):
    def request(self,*args,**kwargs):requests.append(kwargs.get('headers',{}))
    def getresponse(self):return responses.pop(0)
    def close(self):pass
-  with tempfile.TemporaryDirectory() as temp,patch('scripts.attachment_resume.public_addresses',return_value=(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit('https://video.twimg.com/a.mp4'),['8.8.8.8'])),patch('scripts.attachment_resume.PinnedHTTPS',Connection):
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.attachment_resume.public_addresses',return_value=(__import__('urllib.parse',fromlist=['urlsplit']).urlsplit('https://video.twimg.com/a.mp4'),['8.8.8.8'])) as resolver,patch('scripts.attachment_resume.PinnedHTTPS',Connection):
    dest=Path(temp)/'video.mp4';partial=dest.with_suffix('.mp4.part');partial.write_bytes(b'old');progress=partial.with_suffix('.part.json');progress.write_text(json.dumps(dict(url='https://video.twimg.com/a.mp4',validator='"old"')))
    responses.append(Response(206,b'new',{'ETag':'"new"','Content-Range':'bytes 3-5/6'}))
-   with self.assertRaises(ValueError):download('https://video.twimg.com/a.mp4',dest,approved=True)
+   with self.assertRaises(ValueError):download('https://video.twimg.com/a.mp4',dest,approved=True,resolve_addresses=resolver)
    self.assertEqual(partial.read_bytes(),b'old');self.assertFalse(progress.exists())
-   responses.append(Response(200,b'replacement',{'ETag':'"new"','Content-Length':'11'}));download('https://video.twimg.com/a.mp4',dest,approved=True)
+   responses.append(Response(200,b'replacement',{'ETag':'"new"','Content-Length':'11'}));download('https://video.twimg.com/a.mp4',dest,approved=True,resolve_addresses=resolver)
    self.assertNotIn('Range',requests[-1]);self.assertEqual(dest.read_bytes(),b'replacement')
