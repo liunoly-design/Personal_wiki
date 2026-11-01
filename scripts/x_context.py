@@ -5,24 +5,15 @@ import re
 from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 try:
-    from .x_article import select_target_article
+    from .x_article import select_target_article, article_permalink, post_url
 except ImportError:
-    from x_article import select_target_article
-
-
-def post_url(value):
-    u=urlsplit(urljoin('https://x.com',value))
-    match=re.fullmatch(r'/([\w]+)/status/(\d+)/?',u.path)
-    if u.scheme!='https' or u.hostname not in ('x.com','twitter.com','www.x.com','www.twitter.com') or u.username or u.password or u.port not in (None,443) or not match:
-        return None
-    return f'https://x.com/{match[1].lower()}/status/{match[2]}'
+    from x_article import select_target_article, article_permalink, post_url
 
 
 def parse_posts(soup, ambiguous=None):
     posts={};groups={}
     for node in soup.select('article'):
-        links=[a for a in node.select('a[href]') if a.find_parent('article') is node and not a.has_attr('data-quote')]
-        own=next((post_url(a['href']) for a in links if post_url(a['href'])),None)
+        own=article_permalink(node)
         if own:groups.setdefault(own,[]).append(node)
     for own,nodes in groups.items():
         # The capture selector and final context must retain the same copy.
@@ -33,7 +24,7 @@ def parse_posts(soup, ambiguous=None):
             continue
         quotes=[post_url(a['href']) for a in node.select('a[data-quote][href]')]
         for nested in node.select('article'):
-            quote=next((post_url(a['href']) for a in nested.select('a[href]') if post_url(a['href'])),None)
+            quote=article_permalink(nested)
             if quote:quotes.append(quote)
         clean=copy.copy(node)
         for nested in clean.select('article'):nested.decompose()

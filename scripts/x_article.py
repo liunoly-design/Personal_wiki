@@ -1,15 +1,44 @@
 """Select one evidenced X post, retaining complete responsive copies."""
 import copy
+import re
 from collections import Counter
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
+
+
+def post_url(value):
+    u=urlsplit(urljoin('https://x.com',value))
+    match=re.fullmatch(r'/([\w]+)/status/(\d+)/?',u.path)
+    if u.scheme!='https' or u.hostname not in ('x.com','twitter.com','www.x.com','www.twitter.com') or u.username or u.password or u.port not in (None,443) or not match:
+        return None
+    return f'https://x.com/{match[1].lower()}/status/{match[2]}'
+
+
+def article_permalink_candidates(article):
+    links=[(a,post_url(a['href'])) for a in article.select('a[href]')
+           if a.find_parent('article') is article and not a.has_attr('data-quote')]
+    links=[(a,url) for a,url in links if url]
+    # The body can link another post before its own timestamp permalink.
+    # Public HTML mirrors may retain only the rendered timestamp text.
+    timestamps={url for a,url in links if a.select_one('time') or re.fullmatch(
+        r'\d{1,2}:\d{2}(?:\s*[AP]M)?\s*[·•]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s+\d{4}',
+        a.get_text(' ',strip=True),re.IGNORECASE)}
+    if timestamps:
+        return list(timestamps) if len(timestamps)==1 else []
+    # Without timestamp evidence every owned post link remains a candidate.
+    # Keep conflicting responsive copies visible to the ambiguity check.
+    return list(dict.fromkeys(url for _,url in links))
+
+
+def article_permalink(article):
+    candidates=article_permalink_candidates(article)
+    return candidates[0] if candidates else None
 
 
 def select_target_article(soup, url):
-    target=urlsplit(url).path.rstrip('/').lower()
+    target=post_url(url)
     candidates=[]
     for article in soup.select('article'):
-        owned=[a for a in article.select('a[href]') if a.find_parent('article') is article]
-        if any(urlsplit(a['href']).path.rstrip('/').lower()==target for a in owned):
+        if target and target in article_permalink_candidates(article):
             candidates.append(article)
     # Duplicate wrapper markup may contain the same target again. Keep the
     # deepest matching target while retaining quotes inside it.

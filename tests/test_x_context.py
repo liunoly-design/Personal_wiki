@@ -4,6 +4,31 @@ from unittest.mock import patch
 from scripts.capture_article import capture
 
 class XContextTest(unittest.TestCase):
+ def test_body_post_link_before_timestamp_does_not_replace_source_identity(self):
+  html='<article><p>目标正文 <a href="https://x.com/b/status/9">https://x.com/b/status/9</a></p><a href="/a/status/1">12:02 PM · Oct 11, 2026</a><a href="/a/status/1">10.9K Views</a></article>'
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=lambda url,hosts,limit,dest:dest.write_text(html)),patch('scripts.capture_article.extract_public',side_effect=AssertionError('Unexpected fallback')):
+   result=capture('https://x.com/a/status/1',temp);directory=Path(result['directory']);body=(directory/'article.md').read_text()
+   self.assertIn('目标正文',body);self.assertIn('https://x.com/b/status/9',body)
+   self.assertEqual((directory/'raw.html').read_text(),html)
+ def test_link_from_other_post_does_not_become_a_copy_of_target(self):
+  target='<article><a href="/a/status/1"><time datetime="2026-11-01T01:00:00Z">Nov 1</time></a><p>目标正文</p></article>'
+  other='<article><p>其他文章 <a href="/a/status/1">目标链接</a></p><a href="/b/status/9"><time datetime="2026-11-01T02:00:00Z">Nov 1</time></a></article>'
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=lambda url,hosts,limit,dest:dest.write_text(other+target)),patch('scripts.capture_article.extract_public',side_effect=AssertionError('Unexpected fallback')):
+   result=capture('https://x.com/a/status/1',temp);body=(Path(result['directory'])/'article.md').read_text()
+   self.assertIn('目标正文',body);self.assertNotIn('其他文章',body)
+ def test_nested_quote_uses_its_permalink_instead_of_body_post_link(self):
+  html='<article><a href="/a/status/1"><time>Nov 1</time></a><p>目标正文</p><article><p>引用正文 <a href="/c/status/8">其他链接</a></p><a href="/b/status/9"><time>Nov 1</time></a></article></article>'
+  def request(url,hosts,limit,dest):
+   if url=='https://x.com/a/status/1':dest.write_text(html)
+   else:raise AssertionError('Unexpected request for a link inside the quote body')
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=request),patch('scripts.capture_article.extract_public',side_effect=AssertionError('Unexpected fallback')):
+   result=capture('https://x.com/a/status/1',temp);body=(Path(result['directory'])/'article.md').read_text()
+   self.assertIn('引用正文',body);self.assertIn('https://x.com/b/status/9',body)
+ def test_missing_timestamp_cannot_hide_a_conflicting_target_copy(self):
+  html='<article><a href="/a/status/1">post</a><p>short</p></article><article><a href="/b/status/9">body link</a><p>different full body</p><a href="/a/status/1">post</a></article>'
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.capture_article.request',side_effect=lambda url,hosts,limit,dest:dest.write_text(html)),patch('scripts.capture_article.extract_public',side_effect=OSError('No independently verified source')):
+   with self.assertRaises(OSError):capture('https://x.com/a/status/1',temp)
+   self.assertFalse(list(Path(temp).rglob('article.md')))
  def test_nested_quote_relationship_survives_duplicate_order(self):
   marked='<article><a href="/a/status/1">post</a><p>目标正文</p><article><a href="/b/status/9">post</a><p>嵌套引用正文</p><a data-quote href="/c/status/8">深层引用</a></article></article>'
   unmarked=marked.replace(' data-quote','')
