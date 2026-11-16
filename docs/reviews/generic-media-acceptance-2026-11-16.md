@@ -66,4 +66,3 @@ Mini 最终版本 `0.8.0-file-b5e457ecb418`，服务版本0.8.0；generic模块�
 代码及报告已推送至 [codex/wiki-ingestion-cli](https://github.com/liunoly-design/Personal_wiki/tree/codex/wiki-ingestion-cli)，并设置远端跟踪。此前 HTTPS 缺少凭据的问题已解决：复用本机已有 SSH 密钥，确认账号为 `liunoly-design`，将本仓库 origin 切换至 `ssh://git@ssh.github.com:443/liunoly-design/Personal_wiki.git`，仓库级配置选用该密钥。
 
 SSH 主机指纹已对照 [GitHub 官方公布值](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)，连接使用 [GitHub 官方 SSH 443 入口](https://docs.github.com/en/authentication/troubleshooting-ssh/using-ssh-over-the-https-port)。已成功 fetch 和普通 push；验收报告可从该分支直接读取。实际密钥、凭据、原始媒体和运行回执继续留在本机私有目录。
-
