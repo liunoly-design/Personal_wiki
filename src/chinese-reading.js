@@ -4,6 +4,13 @@ import {createHash} from 'node:crypto';
 import {store} from './protected-compiler.js';
 import {createCodex} from './codex.js';
 
+function needsTranslation(text){
+ const {masked,preserved}=protect(text);
+ const prose=preserved.reduce((value,p)=>value.replace(p.token,''),masked);
+ const latin=(prose.match(/[A-Za-z]/gu)??[]).length,han=(prose.match(/\p{Script=Han}/gu)??[]).length;
+ return latin>0&&han<=latin;
+}
+
 function units(markdown){
  const result=[];
  const paragraph=text=>{
@@ -29,7 +36,8 @@ function units(markdown){
  for(let i=0;i<result.length;i++){
   const unit={...result[i]};
   if(unit.text!==undefined){
-   while(result[i+1]?.literal!==undefined&&!result[i+1].literal.trim()&&result[i+2]?.text!==undefined&&unit.text.length+result[i+1].literal.length+result[i+2].text.length<=4000){unit.text+=result[i+1].literal+result[i+2].text;i+=2;}
+   if(!needsTranslation(unit.text)){grouped.push({literal:unit.text});continue;}
+   while(result[i+1]?.literal!==undefined&&!result[i+1].literal.trim()&&result[i+2]?.text!==undefined&&needsTranslation(result[i+2].text)&&unit.text.length+result[i+1].literal.length+result[i+2].text.length<=4000){unit.text+=result[i+1].literal+result[i+2].text;i+=2;}
   }
   grouped.push(unit);
  }
@@ -71,8 +79,7 @@ export async function buildChineseReading({vault,record,translate,python,signal,
  for(const unit of units(body)){
   signal?.throwIfAborted();
   if(unit.literal!==undefined){content.push(unit.literal);continue;}
-  const latin=(unit.text.match(/[A-Za-z]/gu)??[]).length,han=(unit.text.match(/\p{Script=Han}/gu)??[]).length;
-  if(latin===0||han>latin){content.push(unit.text);continue;}
+  if(!needsTranslation(unit.text)){content.push(unit.text);continue;}
   const {masked,preserved}=protect(unit.text);
   const key=createHash('sha256').update('gpt-5.6-terra:v1:'+unit.text).digest('hex');
   try{content.push(await readFile(join(cache,'units',key+'.md'),'utf8'));continue;}catch(e){if(e.code!=='ENOENT')throw e;}
