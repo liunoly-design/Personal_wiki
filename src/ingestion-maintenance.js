@@ -117,6 +117,7 @@ export async function repairIngestion(config,id){
   await writes;
   if(code!==0||!sessionId)throw Error('Project development session did not complete with a confirmed session ID');
   const candidate=(await exec('git',['rev-parse','HEAD'],{cwd:project})).stdout.trim();
+  if(candidate!==before)throw Error('Development session changed Git history; outer worker must own commits');
   const workspace=await workspaceState(project);
   const commands=config.maintenance?.testCommands??[[process.execPath,'--test'],[config.python,'-m','unittest','discover','-s','tests','-v']];
   if(!Array.isArray(commands)||!commands.length)throw Error('Maintenance regression commands required');

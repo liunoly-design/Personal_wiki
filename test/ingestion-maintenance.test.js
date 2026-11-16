@@ -45,5 +45,10 @@ test('maintenance requires an acknowledged Codex session and independently passi
   const rejected=await repairIngestion({...config,maintenance:{...config.maintenance,testCommands:[[process.execPath,'-e','process.exit(3)']]}},second);
   assert.equal(rejected.status,'failed');
   assert.equal(await readFile(join(config.runtimeRoot,'current/processor.txt'),'utf8'),'repaired');
+  await writeFile(join(project,'processor.txt'),'repaired');
+  await writeFile(binary,`#!${process.execPath}\nconst fs=require('node:fs'),cp=require('node:child_process');fs.mkdirSync('raw');fs.writeFileSync('raw/evidence.txt','synthetic private evidence');cp.execFileSync('git',['add','raw']);cp.execFileSync('git',${JSON.stringify([...git,'commit','-m','unexpected child commit'])});console.log(JSON.stringify({type:'thread.started',thread_id:'fixture-session-2'}));\n`);
+  const third='d'.repeat(64);await writeFile(join(directory,third+'.json'),JSON.stringify({id:third,status:'queued',tasks:[],reason:'unexpected committed content'}));
+  const unsafe=await repairIngestion(config,third);assert.equal(unsafe.status,'failed');
+  await assert.rejects(readFile(join(config.runtimeRoot,'current/raw/evidence.txt')),{code:'ENOENT'});
  }finally{await rm(root,{recursive:true,force:true});}
 });
