@@ -118,6 +118,35 @@ test('an English heading about an images directory remains prose that needs tran
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('separated English fragments translate in one batch while retaining their own positions',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-batch-'));
+ try{
+  const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);const original='中文开头保持原样。\n\nFirst fragment.\n\n中文中段保持原样。\n\nSecond fragment.';await writeFile(join(snapshot,'article.md'),original);let batches=0;
+  const translate=async()=>assert.fail('batch-capable model must not receive one call per fragment');
+  translate.batch=async({items})=>{batches++;assert.equal(items.length,2);return JSON.stringify(items.map(({id,text})=>({id,text:text.replace('First fragment.','第一段英文。').replace('Second fragment.','第二段英文。')})));};
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate,generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/batch-reading.md---\n# 批量阅读\n摘要。\n---END FILE---'});
+  const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'batch-reading',url:'https://example.org/batch'});assert.equal(result.reading.status,'complete');assert.equal(batches,1);const reading=await readFile(result.reading.path,'utf8');assert.ok(reading.indexOf('第一段英文')<reading.indexOf('中文中段'));assert.ok(reading.indexOf('中文中段')<reading.indexOf('第二段英文'));assert.equal(await readFile(join(result.archive,'article.md'),'utf8'),original);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('a batch rejects foreign identities and resumes only unfinished validated fragments',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-batch-retry-'));
+ try{
+  const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);const original='First fragment.\n\n中文中段保持原样。\n\n# Second heading';await writeFile(join(snapshot,'article.md'),original);let attempt=0;const sizes=[];
+  const translate=async()=>assert.fail('batch interface expected');
+  translate.batch=async({items,feedback})=>{
+   sizes.push(items.length);attempt++;
+   if(attempt===1)return JSON.stringify(items.map((x,i)=>({id:i===0?'foreign-id':x.id,text:x.text})));
+   if(attempt===2){assert.ok(feedback);return JSON.stringify(items.map((x,i)=>({id:x.id,text:x.text.replace('First fragment.','第一段。').replace('Second heading','第二节')+(i===1?'\n- extra':'')})));}
+   assert.equal(items.length,1);assert.ok(items[0].feedback);return JSON.stringify(items.map(x=>({id:x.id,text:x.text.replace('Second heading','第二节')})));
+  };
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate,generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/batch-retry.md---\n# 批量恢复\n摘要。\n---END FILE---'});
+  const first=await adapters.importAndCompile({capture:{directory:snapshot},slug:'batch-retry',url:'https://example.org/batch-retry'});assert.equal(first.reading.status,'pending');
+  await assert.rejects(adapters.retryReading(first.sourceId),/structure/);
+  const done=await adapters.retryReading(first.sourceId);assert.equal(done.status,'complete');assert.deepEqual(sizes,[2,2,1]);const reading=await readFile(done.path,'utf8');assert.match(reading,/第一段/);assert.match(reading,/# 第二节/);assert.equal(await readFile(join(first.archive,'article.md'),'utf8'),original);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('long English article retains every section, table, image, link and code through Chinese reading',async()=>{
  const root=await mkdtemp(join(tmpdir(),'long-reading-'));
  try{const vault=join(root,'v'),snapshot=join(root,'s');await mkdir(vault);await mkdir(snapshot);await mkdir(join(snapshot,'images'));await writeFile(join(snapshot,'images/a.png'),'image');const paragraphs=Array.from({length:45},(_,i)=>`## Section ${i+1}\n\nThis paragraph preserves all evidence and limitations for sample ${i+1}. `+('The source describes an experiment with a bounded result. '.repeat(8)));const original=paragraphs.join('\n\n')+'\n\n| Label | Value |\n| --- | --- |\n| Sample | 45 |\n\n![Image](images/a.png)\n\n[Evidence](https://example.org/evidence)\n\n```python\nprint("unchanged")\n```\n\n## Final section\n\nFinal evidence remains.';await writeFile(join(snapshot,'article.md'),original);let translations=0;const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async({text})=>{translations++;return text.replaceAll('Section','章节').replaceAll('This paragraph preserves all evidence and limitations for sample','本段保留该样本的所有证据和限制').replaceAll('The source describes an experiment with a bounded result.','来源描述的是具有适用范围限制的实验结果。').replace('Final section','最后一节').replace('Final evidence remains.','最后证据保留。');},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/long-article.md---\n# 长文\n摘要。\n---END FILE---'});const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'long-article',url:'https://example.org/long'});assert.equal(result.reading.status,'complete');const body=await readFile(result.reading.path,'utf8');for(let i=1;i<=45;i++)assert.ok(body.includes('## 章节 '+i));assert.match(body,/最后证据保留/);assert.match(body,/https:\/\/example.org\/evidence/);assert.match(body,/print\("unchanged"\)/);assert.match(body,/\| Sample \| 45 \|/);assert.ok(translations>5);assert.equal(await readFile(join(result.archive,'article.md'),'utf8'),original);}finally{await rm(root,{recursive:true,force:true});}

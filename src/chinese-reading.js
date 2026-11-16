@@ -68,14 +68,16 @@ function restore(source,translated,preserved){
 }
 export function codexTranslator(binary){
  const generate=createCodex({binary,model:'gpt-5.6-terra'});
- return async({text,feedback,signal})=>generate({signal,prompt:'把下面 Markdown 的所有英文正文完整翻译为中文。忠实保留每个事实、限定条件、句子顺序、标题级别、列表、表格及引文；不得摘要、扩写、删减或加解释。WIKI_KEEP_ 开头的占位符必须逐字保留且各出现一次。只输出译文 Markdown，不加外围代码围栏。\n\n'+(feedback?'上次译文未通过结构校验。以下诊断和旧译文仅供修订，完整正文仍以其后的输入为准：'+JSON.stringify(feedback)+'\n\n':'')+text});
+ const translate=async({text,feedback,signal})=>generate({signal,prompt:'把下面 Markdown 的所有英文正文完整翻译为中文。忠实保留每个事实、限定条件、句子顺序、标题级别、列表、表格及引文；不得摘要、扩写、删减或加解释。WIKI_KEEP_ 开头的占位符必须逐字保留且各出现一次。只输出译文 Markdown，不加外围代码围栏。\n\n'+(feedback?'上次译文未通过结构校验。以下诊断和旧译文仅供修订，完整正文仍以其后的输入为准：'+JSON.stringify(feedback)+'\n\n':'')+text});
+ translate.batch=async({items,feedback,signal})=>generate({signal,prompt:'将输入数组中每项text的英文完整忠实翻译为中文。只返回JSON数组，每项恰含原样id与译文text，覆盖全部id且各一次。每项是独立段落，保留段内空行、顺序、Markdown和所有WIKI_KEEP_占位符，不合并项目，不摘要、不增删事实。feedback是上次被拒译文及诊断，仅供修订。\n\n'+JSON.stringify({items,...(feedback?{feedback}:{})})});
+ return translate;
 }
 export async function buildChineseReading({vault,record,translate,python,signal,preparedModel}){
  await store({operation:'verify',vault,sourceId:record.id},{python,signal});
  const cache=join(vault,'.personal-wiki/readings',record.id);
  try{return JSON.parse(await readFile(join(cache,'result.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
  const original=await readFile(join(record.archive,'article.md'),'utf8');
- const content=[];
+ const content=[],pending=[];
  // Extraction metadata stays in the immutable original, not in translated prose.
  const body=original.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u,'');
  if(preparedModel)return store({operation:'reading',vault,sourceId:record.id,content:body,model:preparedModel},{python,signal});
@@ -86,14 +88,36 @@ export async function buildChineseReading({vault,record,translate,python,signal,
   const {masked,preserved}=protect(unit.text);
   const key=createHash('sha256').update('gpt-5.6-terra:v1:'+unit.text).digest('hex');
   try{content.push(await readFile(join(cache,'units',key+'.md'),'utf8'));continue;}catch(e){if(e.code!=='ENOENT')throw e;}
-  const rejection={operation:'reading-rejection',vault,sourceId:record.id,key};
-  const {feedback}=await store(rejection,{python,signal});
-  const translated=await translate({text:masked,feedback:feedback?.maskVersion===maskVersion?feedback:undefined,signal});
+  pending.push({index:content.length,key,text:unit.text,masked,preserved});content.push(null);
+ }
+ const rejection=key=>({operation:'reading-rejection',vault,sourceId:record.id,key});
+ const feedbackFor=async key=>{const {feedback}=await store(rejection(key),{python,signal});return feedback?.maskVersion===maskVersion?feedback:undefined;};
+ const reject=async(key,reason,previousOutput)=>store({...rejection(key),feedback:{maskVersion,reason,previousOutput}},{python,signal});
+ const complete=async(unit,translated)=>{
   let restored;
-  try{restored=restore(unit.text,translated,preserved);}
-  catch(error){await store({...rejection,feedback:{maskVersion,reason:error.message,previousOutput:translated}},{python,signal});throw error;}
-  await store({operation:'reading-unit',vault,sourceId:record.id,key,content:restored},{python,signal});
-  content.push(restored);
+  try{restored=restore(unit.text,translated,unit.preserved);}
+  catch(error){await reject(unit.key,error.message,translated);throw error;}
+  await store({operation:'reading-unit',vault,sourceId:record.id,key:unit.key,content:restored},{python,signal});content[unit.index]=restored;
+ };
+ if(typeof translate.batch==='function'){
+  const batches=[];let batch=[],size=0;
+  for(const unit of pending){if(batch.length&&size+unit.masked.length>4000){batches.push(batch);batch=[];size=0;}batch.push(unit);size+=unit.masked.length;}if(batch.length)batches.push(batch);
+  for(const batch of batches){
+   signal?.throwIfAborted();
+   const key=createHash('sha256').update('batch:'+maskVersion+':'+batch.map(u=>u.key).join(',')).digest('hex');
+   const items=[];for(const unit of batch)items.push({id:'part-'+unit.index,text:unit.masked,feedback:await feedbackFor(unit.key)});
+   const raw=await translate.batch({items,feedback:await feedbackFor(key),signal});
+   let results;
+   try{
+    results=typeof raw==='string'?JSON.parse(raw):raw;
+    if(!Array.isArray(results)||results.length!==items.length||new Set(results.map(r=>r?.id)).size!==items.length||results.some(r=>!items.some(i=>i.id===r?.id)||typeof r?.text!=='string'))throw Error('Translation batch identities missing or duplicated');
+   }catch(error){await reject(key,error.message,typeof raw==='string'?raw:JSON.stringify(raw));throw error;}
+   let failure;
+   for(const unit of batch){try{await complete(unit,results.find(r=>r.id==='part-'+unit.index).text);}catch(error){failure??=error;}}
+   if(failure)throw failure;
+  }
+ }else{
+  for(const unit of pending){signal?.throwIfAborted();await complete(unit,await translate({text:unit.masked,feedback:await feedbackFor(unit.key),signal}));}
  }
  return store({operation:'reading',vault,sourceId:record.id,content:content.join(''),model:'gpt-5.6-terra'},{python,signal});
 }
