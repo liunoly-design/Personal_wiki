@@ -61,6 +61,20 @@ test('translation failure keeps compiled knowledge; retry only translates unfini
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('rejected reading structure is explained on retry while original bytes remain protected',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-feedback-'));
+ try{
+  const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);
+  const original='# Checklist\n\n- Keep every item.';await writeFile(join(snapshot,'article.md'),original);let calls=0;
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,
+   translate:async({feedback})=>{calls++;return feedback?'# 核对清单\n\n- 保留每一项。':'# 核对清单\n\n保留每一项。';},
+   generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/checklist.md---\n# 清单\n摘要。\n---END FILE---'
+  });
+  const first=await adapters.importAndCompile({capture:{directory:snapshot},slug:'checklist',url:'https://example.org/checklist'});assert.equal(first.reading.status,'pending');
+  const recovered=await adapters.retryReading(first.sourceId);assert.equal(recovered.status,'complete');assert.match(await readFile(recovered.path,'utf8'),/- 保留每一项/);assert.equal(await readFile(join(first.archive,'article.md'),'utf8'),original);assert.equal(calls,2);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('long English article retains every section, table, image, link and code through Chinese reading',async()=>{
  const root=await mkdtemp(join(tmpdir(),'long-reading-'));
  try{const vault=join(root,'v'),snapshot=join(root,'s');await mkdir(vault);await mkdir(snapshot);await mkdir(join(snapshot,'images'));await writeFile(join(snapshot,'images/a.png'),'image');const paragraphs=Array.from({length:45},(_,i)=>`## Section ${i+1}\n\nThis paragraph preserves all evidence and limitations for sample ${i+1}. `+('The source describes an experiment with a bounded result. '.repeat(8)));const original=paragraphs.join('\n\n')+'\n\n| Label | Value |\n| --- | --- |\n| Sample | 45 |\n\n![Image](images/a.png)\n\n[Evidence](https://example.org/evidence)\n\n```python\nprint("unchanged")\n```\n\n## Final section\n\nFinal evidence remains.';await writeFile(join(snapshot,'article.md'),original);let translations=0;const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async({text})=>{translations++;return text.replaceAll('Section','章节').replaceAll('This paragraph preserves all evidence and limitations for sample','本段保留该样本的所有证据和限制').replaceAll('The source describes an experiment with a bounded result.','来源描述的是具有适用范围限制的实验结果。').replace('Final section','最后一节').replace('Final evidence remains.','最后证据保留。');},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/long-article.md---\n# 长文\n摘要。\n---END FILE---'});const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'long-article',url:'https://example.org/long'});assert.equal(result.reading.status,'complete');const body=await readFile(result.reading.path,'utf8');for(let i=1;i<=45;i++)assert.ok(body.includes('## 章节 '+i));assert.match(body,/最后证据保留/);assert.match(body,/https:\/\/example.org\/evidence/);assert.match(body,/print\("unchanged"\)/);assert.match(body,/\| Sample \| 45 \|/);assert.ok(translations>5);assert.equal(await readFile(join(result.archive,'article.md'),'utf8'),original);}finally{await rm(root,{recursive:true,force:true});}

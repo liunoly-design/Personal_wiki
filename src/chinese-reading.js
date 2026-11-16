@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {store} from './protected-compiler.js';
 import {createCodex} from './codex.js';
+import {saveJSON,optionalJSON} from './durable-files.js';
 
 function units(markdown){
  const result=[];
@@ -49,14 +50,15 @@ function restore(source,translated,preserved){
  const translatedProse=preserved.reduce((text,p)=>text.replace(p.token,''),translated);
  if(sourceProse.length>160&&translatedProse.length<sourceProse.length*0.15)throw Error('Chinese reading appears truncated; requires review');
  for(const {token,value} of preserved){if(translated.split(token).length!==2)throw Error('Chinese reading changed a protected reference');translated=translated.replace(token,value);}
- for(const pattern of [/^#{1,6} /gmu,/^\s*(?:[-*+] |\d+[.)] )/gmu,/\|/gu,/!\[/gu]){
-  if([...source.matchAll(pattern)].length!==[...translated.matchAll(pattern)].length)throw Error('Chinese reading structure differs; requires review');
+ for(const [label,pattern] of [['headings',/^#{1,6} /gmu],['list-items',/^\s*(?:[-*+] |\d+[.)] )/gmu],['table-separators',/\|/gu],['images',/!\[/gu]]){
+  const expected=[...source.matchAll(pattern)].length,actual=[...translated.matchAll(pattern)].length;
+  if(expected!==actual)throw Error('Chinese reading structure differs; '+label+' expected '+expected+', received '+actual);
  }
  return translated;
 }
 export function codexTranslator(binary){
  const generate=createCodex({binary,model:'gpt-5.6-terra'});
- return async({text,signal})=>generate({signal,prompt:'把下面 Markdown 的所有英文正文完整翻译为中文。忠实保留每个事实、限定条件、句子顺序、标题级别、列表、表格及引文；不得摘要、扩写、删减或加解释。WIKI_KEEP_ 开头的占位符必须逐字保留且各出现一次。只输出译文 Markdown，不加外围代码围栏。\n\n'+text});
+ return async({text,feedback,signal})=>generate({signal,prompt:'把下面 Markdown 的所有英文正文完整翻译为中文。忠实保留每个事实、限定条件、句子顺序、标题级别、列表、表格及引文；不得摘要、扩写、删减或加解释。WIKI_KEEP_ 开头的占位符必须逐字保留且各出现一次。只输出译文 Markdown，不加外围代码围栏。\n\n'+(feedback?'上次译文未通过结构校验。以下诊断和旧译文仅供修订，完整正文仍以其后的输入为准：'+JSON.stringify(feedback)+'\n\n':'')+text});
 }
 export async function buildChineseReading({vault,record,translate,python,signal,preparedModel}){
  await store({operation:'verify',vault,sourceId:record.id},{python,signal});
@@ -75,8 +77,11 @@ export async function buildChineseReading({vault,record,translate,python,signal,
   const {masked,preserved}=protect(unit.text);
   const key=createHash('sha256').update('gpt-5.6-terra:v1:'+unit.text).digest('hex');
   try{content.push(await readFile(join(cache,'units',key+'.md'),'utf8'));continue;}catch(e){if(e.code!=='ENOENT')throw e;}
-  const translated=await translate({text:masked,signal});
-  const restored=restore(unit.text,translated,preserved);
+  const rejected=join(cache,'rejected',key+'.json');
+  const translated=await translate({text:masked,feedback:await optionalJSON(rejected),signal});
+  let restored;
+  try{restored=restore(unit.text,translated,preserved);}
+  catch(error){await saveJSON(rejected,{reason:error.message,previousOutput:translated});throw error;}
   await store({operation:'reading-unit',vault,sourceId:record.id,key,content:restored},{python,signal});
   content.push(restored);
  }
