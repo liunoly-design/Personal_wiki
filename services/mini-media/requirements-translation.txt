@@ -1,0 +1,4 @@
+# Optional Apple Silicon English→Chinese translator, same versions as accepted Mini runtime.
+mlx==0.32.3
+mlx-lm==0.32.0
+transformers==5.18.0

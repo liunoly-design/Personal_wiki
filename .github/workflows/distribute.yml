@@ -1,0 +1,38 @@
+name: Publish independent packages
+on:
+  push:
+    tags: ['distribution-v*']
+permissions:
+  contents: write
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify portable intake and installers
+        run: |
+          node --test test/portable-bundle.test.js
+          python -m unittest discover -s tests/distribution
+      - name: Build clean source packages
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#distribution-v}"
+          for COMPONENT in cli wiki-bridge mini-media llm-wiki-setup; do
+            python distribution/build.py --component "$COMPONENT" --version "$VERSION" --output dist
+          done
+          cat dist/*.sha256 > dist/SHA256SUMS
+          cp config/examples/*.json dist/
+          cp docs/independent-install.md docs/llm-wiki-install.md docs/reviews/independent-distribution-2026-11-16.md dist/
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Personal Wiki ${RELEASE_TAG#distribution-v} — independent packages" --notes-file distribution/RELEASE-NOTES.md

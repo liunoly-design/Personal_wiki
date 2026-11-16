@@ -1,0 +1,2 @@
+-r requirements-core.txt
+f2 @ git+https://github.com/Johnserf-Seed/f2.git@3f842b6b28bf70e5525631f7d992245b2dbccc0b
