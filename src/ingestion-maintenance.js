@@ -49,7 +49,11 @@ async function replayVerified(config,request){
    await exec(process.execPath,[cli,'retry',task,'--maintenance-replay',request.id,'--config',config.configPath],{timeout:30000});
    const result=await exec(process.execPath,[cli,'run',task,'--config',config.configPath],{timeout:3600000,maxBuffer:2*1024*1024});
    status=JSON.parse(result.stdout).status;
-  }catch{}
+  }catch(error){
+   const busy=/Task queue already running/iu.test(String(error.message));
+   request=await updateMaintenance(config,request.id,latest=>({...latest,status:busy?'verified':'waiting_replay_result',nextAttemptAt:Date.now()+60000,replayResults:{...latest.replayResults,[task]:{status:busy?'waiting_source_lock':'waiting_result',reason:String(error.message).slice(0,1000),at:new Date().toISOString()}}}));
+   break;
+  }
   request=await updateMaintenance(config,request.id,latest=>({...latest,replayedTasks:[...new Set([...(latest.replayedTasks??[]),task])],replayResults:{...latest.replayResults,[task]:{status,version:request.version,at:new Date().toISOString()}}}));
  }
  return request;
@@ -67,7 +71,7 @@ export async function repairIngestion(config,id){
  const persist=async()=>{request=await updateMaintenance(config,id,latest=>({...latest,...request,tasks:[...new Set([...(latest?.tasks??[]),...request.tasks])],resolvedTasks:[...new Set([...(latest?.resolvedTasks??[]),...(request.resolvedTasks??[])])]}));};
  try{
   if(['verified','source_recovered'].includes(request.status)&&request.activated)return await replayVerified(config,request);
-  if(['failed','running','waiting_session_result','source_recovered'].includes(request.status))return request;
+  if(['failed','running','waiting_session_result','waiting_replay_result','source_recovered'].includes(request.status))return request;
   const project=config.maintenance?.project;
   if(!isAbsolute(project??'')){request.status='waiting_bridge';await persist();return request;}
   if(resolve(project)===resolve(import.meta.dirname,'..'))throw Error('Code repair requires a development checkout separate from the running release');

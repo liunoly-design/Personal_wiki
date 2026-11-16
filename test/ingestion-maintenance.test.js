@@ -8,6 +8,19 @@ import {promisify} from 'node:util';
 import {repairIngestion} from '../src/ingestion-maintenance.js';
 const exec=promisify(execFile);
 
+test('a busy source lease leaves verified replay pending and a later attempt can execute it',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-replay-busy-')));
+ try{
+  const stateDir=join(root,'state'),runtimeRoot=join(stateDir,'runtime'),version='e'.repeat(40),id='f'.repeat(64),task='2'.repeat(64),counter=join(root,'calls');
+  const release=join(runtimeRoot,'releases',version,'scripts');await mkdir(release,{recursive:true});
+  await writeFile(join(release,'wiki.mjs'),`import fs from 'node:fs';const p=${JSON.stringify(counter)};const n=fs.existsSync(p)?Number(fs.readFileSync(p,'utf8'))+1:1;fs.writeFileSync(p,String(n));if(n===1){console.error('Task queue already running');process.exit(1)}console.log(JSON.stringify({status:process.argv[2]==='retry'?'queued':'converted'}));`);
+  const directory=join(stateDir,'ingestion/maintenance');await mkdir(directory,{recursive:true});await writeFile(join(directory,id+'.json'),JSON.stringify({id,tasks:[task],status:'verified',activated:true,testsPassed:true,version}));
+  const config={stateDir,runtimeRoot,python:'/usr/bin/python3',configPath:join(root,'config.json'),codexBinary:'/must-not-create-another-session'};
+  const busy=await repairIngestion(config,id);assert.ok(!(busy.replayedTasks??[]).includes(task));
+  const done=await repairIngestion(config,id);assert.equal(done.replayResults[task].status,'converted');assert.equal(await readFile(counter,'utf8'),'3');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('maintenance requires an acknowledged Codex session and independently passing regression before enabling repair',async()=>{
  const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-maintenance-')));
  try{
