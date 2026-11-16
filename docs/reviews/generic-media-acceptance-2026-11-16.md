@@ -58,3 +58,5 @@ Mini 最终版本 `0.8.0-file-b5e457ecb418`，服务版本0.8.0；generic模块�
 全局 personal-wiki skill 已同步新文件能力；launcher/worker 指向版本化 current，实际 `--help` 展示 `--file`，doctor 为 Wiki/media ready。使用已部署 launcher 对上表4个任务重新 run，全部返回 complete，再次核验原件、Wiki 回读及全文检索。私有验收回执在本次开发 checkout 的 `.local/generic-media-live/`，不进入 Git。
 
 当前完整交付中文与英文语音；其他语种、混合语音内未译英文整段、无语音及不完整稿保留待补。单文件限额和后续范围以规格为准。
+
+代码及报告已在本地当前分支提交。尝试同步 GitHub 时，Git 因 HTTPS 凭据不可用返回 `could not read Username`；没有执行强推、改写远端或把未推送称为已同步。该限制不影响已完成的本机 CLI、Mini 服务和 Wiki 入库部署。
