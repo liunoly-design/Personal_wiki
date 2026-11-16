@@ -26,7 +26,7 @@ export function identifyInput({input,text}){
 }
 
 export async function captureArticle({job,config,directory,signal}){
- if(job.platform==='douyin')return collectRemoteDouyin({...config,url:job.url,convertOnly:true,resumeRemote:job.rounds>1,stateDir:config.stateDir,python:config.python,signal,onStage:config.onStage});
+ if(job.platform==='douyin')return collectRemoteDouyin({...config,url:job.url,convertOnly:true,resumeRemote:job.rounds>1||job.recoveries?.length>0,explicitRemoteRecovery:job.recoveries?.length>0,stateDir:config.stateDir,python:config.python,signal,onStage:config.onStage});
  const fx=job.platform==='x'&&(job.rounds===1||job.lastCapture?.provider==='FxEmbed v2 thread'&&job.lastCapture?.contextStatus==='complete');
  const script=fx?'x_provider.py':'capture_article.py';
  if(fx)directory=join(dirname(directory),String(job.generation??0)+'-fx');

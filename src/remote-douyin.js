@@ -48,7 +48,12 @@ export async function collectRemoteDouyin(options,collect) {
   if(!remote.jobId){await onStage('remote_submitting');const response=await client.submit(url,{idempotencyKey:remote.idempotencyKey});remote.jobId=response.job_id;await saveJSON(path,remote);}
  }finally{await release();}
  const report={mode:'remote',remoteJobId:remote.jobId,video:'remote',audio:'remote',transcriptStatus:'pending',knowledgeStatus:'pending'};
- if(options.resumeRemote){const stopped=await client.status(remote.jobId);if(['failed','partial_failed'].includes(stopped.status)&&stopped.error?.retryable===true)await client.resume(remote.jobId);}
+ if(options.resumeRemote){
+  const stopped=await client.status(remote.jobId);
+  if(['failed','partial_failed'].includes(stopped.status)&&(stopped.error?.retryable===true||options.explicitRemoteRecovery)||stopped.status==='waiting_login'&&options.explicitRemoteRecovery){
+   try{await client.resume(remote.jobId);}catch(error){if(stopped.status==='waiting_login')throw Error('Remote media waiting_login; recovery prerequisites still unavailable');throw error;}
+  }
+ }
  await onStage('remote_waiting',{video:report});
  let result;
  try{result=await client.wait(remote.jobId,{timeoutMs:1800000,expectedSourceUrl:url});}
