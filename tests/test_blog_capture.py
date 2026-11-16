@@ -4,6 +4,13 @@ from unittest.mock import patch
 from scripts.capture_article import capture
 
 class BlogCaptureTest(unittest.TestCase):
+ def test_unrecognized_image_bytes_stay_in_pending_materials(self):
+  original=b'\x00\x00\x00\x20ftypavifsynthetic-unrecognized-image'
+  def fetch(url,limit,dest,**kwargs):
+   dest.write_bytes(original if url.endswith('/image') else b'<article><p>Complete article with a required image.</p><img src="/image"></article>');return url
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.blog_capture.fetch_public',side_effect=fetch):
+   result=capture('https://example.org/article',temp);package=Path(result['directory'])
+   self.assertEqual(result['status'],'partial');self.assertEqual((package/result['missingAssets'][0]['retained_path']).read_bytes(),original)
  def test_login_form_and_explicit_truncation_do_not_publish_as_articles(self):
   for html in ['<main><h1>Account</h1><form><input type="password"></form><p>Sign in to read the full article.</p></main>','<article data-truncated="true"><h1>Preview</h1><p>Only the beginning is available here.</p></article>']:
    def fetch(url,limit,dest,**kwargs):dest.write_text(html);return url

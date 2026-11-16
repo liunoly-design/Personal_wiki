@@ -43,6 +43,7 @@ test('gated Xiaohongshu access waits without inventing login requirements; new c
   const gated=await service.run(job.id);assert.equal(gated.status,'waiting_access');assert.equal(gated.maintenance,undefined);
   const updated=await service.submit({input:base+'?xsec_token=new',mode:'convert'});
   assert.equal(updated.id,job.id);assert.equal(updated.rounds,gated.rounds);assert.match(updated.fetchUrl,/token=new/);
+  assert.equal(updated.input.input,base+'?xsec_token=old');assert.equal(updated.fetchHistory.at(-1).input,base+'?xsec_token=new');
   assert.equal((await service.run(job.id)).rounds,gated.rounds);
  }finally{await rm(root,{recursive:true,force:true});}
 });
@@ -71,6 +72,24 @@ test('concurrent short and signed note links publish only one canonical Wiki sou
   const initial=await Promise.all([service.run(a.id),service.run(b.id)]);
   const final=await Promise.all(initial.map(j=>service.run(j.id)));
   assert.ok(final.every(j=>j.status==='complete'));assert.equal(final[0].result.source,final[1].result.source);assert.equal((await readdir(join(vault,'wiki/sources'))).length,1);assert.equal(modelCalls,2);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('supplementing a partial short note preserves its resolved identity when the long link arrives later',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-partial-alias-'))),vault=join(root,'vault');
+ try{
+  await mkdir(vault);const directory=join(root,'package');await mkdir(directory);await writeFile(join(directory,'article.md'),'待补正文。');
+  const canonical='https://www.xiaohongshu.com/explore/64abcdef0123456789abcdef';
+  const service=await openIngestion({stateDir:join(root,'state'),vault,python:'/usr/bin/python3'},{
+   capture:async({job})=>({directory,status:job.url===canonical?'complete':'partial',url:canonical}),
+   api:{read:path=>readFile(join(vault,path),'utf8'),search:async()=>({results:(await readdir(join(vault,'wiki/sources'))).map(n=>({path:'wiki/sources/'+n}))})},
+   generate:async({stage,sourceName})=>stage==='analysis'?'分析':`---FILE: wiki/sources/${sourceName}.md---\n# 笔记\n来源摘要。\n---END FILE---`
+  });
+  const short=await service.submit({input:'https://xhslink.cn/o/synthetic',mode:'record'});await service.run(short.id);
+  const supplement=join(root,'full.md');await writeFile(supplement,'# 补齐笔记\n\n完整正文和来自末段的核对证据全部保留。');await service.supplement(short.id,{file:supplement});
+  const done=await service.run(short.id);assert.equal(done.status,'complete');assert.equal(done.bundle.url,canonical);
+  const long=await service.submit({input:canonical,mode:'record'});const reused=await service.run(long.id);
+  assert.equal(reused.status,'complete');assert.equal(done.result.source,reused.result.source);assert.equal((await readdir(join(vault,'wiki/sources'))).length,1);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
@@ -115,6 +134,17 @@ test('parallel same-platform failures remain attached to one maintenance request
   assert.equal(jobs[0].maintenance.id,jobs[1].maintenance.id);
   const request=await service.maintain(a.id);
   assert.deepEqual(request.tasks.sort(),[a.id,b.id].sort());
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('real subprocess failures aggregate without task output paths creating repair sessions',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-process-fail-')));
+ try{
+  const service=await openIngestion({stateDir:join(root,'state'),python:'/usr/bin/python3'},{capture:async({job,directory})=>exec('/usr/bin/false',['--url',job.url,'--output',directory])});
+  const a=await service.submit({input:'https://example.org/first',mode:'convert'}),b=await service.submit({input:'https://example.org/second',mode:'convert'});
+  const jobs=await Promise.all([service.run(a.id),service.run(b.id)]);
+  assert.equal(jobs[0].status,'pending');assert.equal(jobs[0].maintenance.id,jobs[1].maintenance.id);
+  assert.equal((await service.maintain(a.id)).tasks.length,2);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

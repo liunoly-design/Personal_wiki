@@ -146,9 +146,10 @@ def capture_blog(url, output, render=False):
             image['src'] = relative
             assets.append({'kind':'image','url': remote, 'path': relative, 'status': 'downloaded'})
         except (ValueError, OSError, http.client.HTTPException) as error:
-            destination.unlink(missing_ok=True)
             image['src'] = remote
-            assets.append({'url': remote, 'status': 'failed', 'reason': str(error)})
+            asset={'kind':'image','url':remote,'status':'failed','reason':str(error)}
+            if destination.exists():asset['retained_path']=destination.relative_to(directory).as_posix()
+            assets.append(asset)
     for anchor in body.select('a[href]'):
         anchor['href'] = urljoin(final, anchor['href'])
     title = (soup.title.get_text(' ', strip=True) if soup.title else '')

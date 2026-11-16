@@ -16,6 +16,12 @@ const exec=promisify(execFile);
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const valid=id=>/^[a-f0-9]{64}$/u.test(id??'');
+function failureMessage(error){
+ const stderr=typeof error.stderr==='string'?error.stderr.trim():'';
+ let message=stderr?stderr.split('\n').filter(Boolean).at(-1):String(error.message);
+ if(message.startsWith('Command failed:'))message=message.split('\n').slice(1).filter(Boolean).at(-1)??'Source process failed (exit '+String(error.code??'unknown')+')';
+ return message.replace(/Bearer\s+\S+/giu,'Bearer [redacted]').slice(0,2000);
+}
 async function privateDirectory(path){
  await mkdir(path,{recursive:true,mode:0o700});
  for(let p=resolve(path);;p=dirname(p)){if(!(await lstat(p)).isDirectory())throw Error('State must use regular directories');if(p===dirname(p))break;}
@@ -50,7 +56,7 @@ export async function openIngestion(config,ports={}){
   const id=hash(requestId??mode+':'+source.url+':'+background+(refresh?':'+randomUUID():''));
   const payloadHash=hash(JSON.stringify({mode,url:source.url,name:name??source.name,background,refresh}));
   return lock('ingress',async()=>{
-   const prior=await optionalJSON(pathFor(id));if(prior){if(prior.payloadHash&&prior.payloadHash!==payloadHash)throw Error('Request identity conflict');if(source.fetchUrl&&source.fetchUrl!==prior.fetchUrl)return lock('source-'+hash(source.url),async()=>{const latest=await status(id);if(!latest.bundle){latest.fetchUrl=source.fetchUrl;latest.input={input};await persist(latest);}return latest;});return prior;}
+   const prior=await optionalJSON(pathFor(id));if(prior){if(prior.payloadHash&&prior.payloadHash!==payloadHash)throw Error('Request identity conflict');if(source.fetchUrl&&source.fetchUrl!==prior.fetchUrl)return lock('source-'+hash(source.url),async()=>{const latest=await status(id);if(!latest.bundle){latest.fetchUrl=source.fetchUrl;latest.fetchHistory=[...(latest.fetchHistory??[]),{input,fetchUrl:source.fetchUrl,requestId:requestId??null,receivedAt:new Date().toISOString()}];await persist(latest);}return latest;});return prior;}
    const cached=!refresh?await optionalJSON(join(root,'bundles',hash(source.url)+'.json')):null;
    const job={id,mode,payloadHash,input:text!==undefined?{text}:{input},name:name??source.name,platform:source.platform,url:source.url,...(source.fetchUrl?{fetchUrl:source.fetchUrl}:{}),background,refresh,status:'queued',rounds:0,createdAt:new Date().toISOString(),...(cached?{bundle:cached}:{})};
    await persist(job);return job;
@@ -59,14 +65,15 @@ export async function openIngestion(config,ports={}){
  async function snapshot(job){
   const directory=join(root,'work',job.id,'snapshots',String(job.generation??0));const markdown=join(directory,'article.md');
   const hashes={};
-  let preparedReadingModel,canonicalUrl=job.url;
+  let preparedReadingModel,canonicalUrl=job.canonicalUrl??job.url;
   if(job.supplementFile||job.platform==='text'){
    const text=job.supplementFile?await readFile(job.supplementFile,'utf8'):identifyInput(job.input).text;
    await exclusive(markdown,text);hashes['article.md']=hash(text);
-   if(job.supplementFile){const note=JSON.stringify({kind:'user-provided',url:job.url,supplements:job.supplements},null,2);await exclusive(join(directory,'supplement.json'),note);hashes['supplement.json']=hash(note);}
+   if(job.supplementFile){const note=JSON.stringify({kind:'user-provided',url:canonicalUrl,requestedUrl:job.url,supplements:job.supplements},null,2);await exclusive(join(directory,'supplement.json'),note);hashes['supplement.json']=hash(note);}
    if(job.supplementImage){const bytes=await readFile(job.supplementImage.file);await exclusive(join(directory,job.supplementImage.name),bytes);hashes[job.supplementImage.name]=hash(bytes);}
   }else{
    const captured=await (ports.capture??captureArticle)({job,config:{...config,onStage:async(stage,details)=>{job.stage=stage;job.details=details;if(details?.directory)job.pendingMaterials=details.directory;await persist(job);}},directory:join(root,'work',job.id,'capture',String(job.generation??0)+'-'+job.rounds),signal:ports.signal});
+   if(captured.url){if(job.canonicalUrl&&job.canonicalUrl!==captured.url)throw Error('Resolved source identity changed; retained for review');job.canonicalUrl=captured.url;}
    job.pendingMaterials=captured.directory;job.lastCapture=captured;await persist(job);
    if(captured.contextStatus==='partial'||captured.status!=='complete')throw Error(captured.failure??'Source incomplete; materials retained in pending area');
    const copy=async(dir,prefix='')=>{for(const entry of await readdir(dir,{withFileTypes:true})){
@@ -134,7 +141,8 @@ export async function openIngestion(config,ports={}){
    job.status='processing';job.rounds++;await persist(job);
    try{job.bundle=await snapshot(job);await saveJSON(join(root,'bundles',hash(job.url)+'.json'),job.bundle);if(job.bundle.url!==job.url)await saveJSON(join(root,'bundles',hash(job.bundle.url)+'.json'),job.bundle);job.status='converted';delete job.failure;await persist(job);}
    catch(error){
-    job.failure=String(error.message).replace(/Bearer\s+\S+/giu,'Bearer [redacted]').slice(0,2000);
+    if(error.cmd||error.stderr)await exclusive(join(root,'work',job.id,'failures',(job.generation??0)+'-'+job.rounds+'.json'),JSON.stringify({message:String(error.message),stderr:String(error.stderr??'').slice(-65536)},null,2));
+    job.failure=failureMessage(error);
     job.failures=[...(job.failures??[]),{round:job.rounds,generation:job.generation??0,at:new Date().toISOString(),reason:job.failure}];
     const reason=waitReason(job.failure);
     job.status=reason??(job.rounds>=2?'pending':'queued');
