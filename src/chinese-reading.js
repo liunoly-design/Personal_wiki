@@ -4,6 +4,9 @@ import {createHash} from 'node:crypto';
 import {store} from './protected-compiler.js';
 import {createCodex} from './codex.js';
 
+// Rejected token maps are versioned; successful units already contain restored text.
+const maskVersion=3;
+
 function needsTranslation(text){
  const {masked,preserved}=protect(text);
  const prose=preserved.reduce((value,p)=>value.replace(p.token,''),masked);
@@ -85,10 +88,10 @@ export async function buildChineseReading({vault,record,translate,python,signal,
   try{content.push(await readFile(join(cache,'units',key+'.md'),'utf8'));continue;}catch(e){if(e.code!=='ENOENT')throw e;}
   const rejection={operation:'reading-rejection',vault,sourceId:record.id,key};
   const {feedback}=await store(rejection,{python,signal});
-  const translated=await translate({text:masked,feedback:feedback?.maskVersion===2?feedback:undefined,signal});
+  const translated=await translate({text:masked,feedback:feedback?.maskVersion===maskVersion?feedback:undefined,signal});
   let restored;
   try{restored=restore(unit.text,translated,preserved);}
-  catch(error){await store({...rejection,feedback:{maskVersion:2,reason:error.message,previousOutput:translated}},{python,signal});throw error;}
+  catch(error){await store({...rejection,feedback:{maskVersion,reason:error.message,previousOutput:translated}},{python,signal});throw error;}
   await store({operation:'reading-unit',vault,sourceId:record.id,key,content:restored},{python,signal});
   content.push(restored);
  }
