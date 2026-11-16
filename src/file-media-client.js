@@ -1,15 +1,21 @@
+import transcriptPolicy from '../services/mini-media/transcript-identifiers.json' with {type:'json'};
 import {isDeepStrictEqual} from 'node:util';
 import {MediaServiceClient} from './media-service-client.js';
 import {open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
+const identifiers=transcriptPolicy.identifiers;
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const id=value=>{if(!/^[a-f0-9]{32}$/u.test(value??''))throw Error('Invalid file job ID');return value;};
 const finite=x=>Number.isFinite(x)&&x>0;
+function preservedToken(kept,segment,index){
+ if(kept.index!==index||typeof kept.source_text!=='string'||kept.target_text!==segment.text||kept.start!==segment.start||kept.end!==segment.end)return false;
+ return identifiers.includes(kept.token)||kept.kind==='pronunciation'&&[...kept.source_text.matchAll(new RegExp(transcriptPolicy.pronunciation,'gu'))].some(m=>m[1]===kept.token);
+}
 export class FileMediaClient extends MediaServiceClient{
  async submitFile(input,{idempotencyKey}={}){
-  const data=await this.json('/v1/file-jobs',{method:'POST',body:input,headers:{'Idempotency-Key':idempotencyKey??hash(JSON.stringify(input))}});id(data.job_id);
+  let data;try{data=await this.json('/v1/file-jobs',{method:'POST',body:input,headers:{'Idempotency-Key':idempotencyKey??hash(JSON.stringify(input))}});}catch(error){if(error.message==='Media service HTTP 404')throw Error('Mini generic media interface not configured');throw error;}id(data.job_id);
   if(!['waiting_upload','queued','downloading','extracting','transcribing','succeeded','failed','partial_failed','waiting_confirmation'].includes(data.status))throw Error('Invalid file submission state');return data;
  }
  async uploadFile(jobId,file,expected){
@@ -38,9 +44,17 @@ export class FileMediaClient extends MediaServiceClient{
   const segments=m.segments;let end=0;
   if(!Array.isArray(segments)||!segments.length||m.coverage?.head_tail_verified!==true||m.coverage.segments!==segments.length)throw Error('File transcript coverage missing');
   for(const s of segments){if(!Number.isFinite(s.start)||!Number.isFinite(s.end)||s.start<0||s.end<=s.start||s.start<end-.25||s.end>m.duration_seconds+1||typeof s.text!=='string'||!s.text.trim())throw Error('File transcript segment invalid');end=s.end;}
+  for(const [index,s] of segments.entries()){
+   let text=s.text.replace(/https?:\/\/\S+/gu,'');
+   for(const kept of m.coverage.preserved_identifiers??[]){
+    if(!preservedToken(kept,s,index))continue;
+    const pattern=new RegExp('(?<![A-Za-z0-9_])'+kept.token+'(?![A-Za-z0-9_])','gu');if(pattern.test(kept.source_text)){pattern.lastIndex=0;text=text.replace(pattern,'');}
+   }
+   if((text.match(/[A-Za-z]/gu)??[]).length>3&&(text.match(/[A-Za-z]/gu)??[]).length>(text.match(/[\u3400-\u9fff]/gu)??[]).length)throw Error('File Chinese prose translation incomplete');
+  }
   if(segments[0].start>10||m.duration_seconds-end>10||m.coverage.first_start!==segments[0].start||m.coverage.last_end!==end)throw Error('File transcript head/tail incomplete');
   if(asr.language!=='zh'&&asr.language!=='chinese'){
-   const t=m.translation;if(t?.target_language!=='zh'||!/^[a-f0-9]{64}$/u.test(t.model_sha256??'')||t.coverage?.all_source_segments_present!==true||t.coverage.source_segments!==segments.length)throw Error('File Chinese translation incomplete');
+   const t=m.translation;if(t?.source_language!==({'english':'en'}[asr.language]??asr.language)||t?.target_language!=='zh'||!/^[a-f0-9]{64}$/u.test(t.model_sha256??'')||t.coverage?.all_source_segments_present!==true||t.coverage.source_segments!==segments.length)throw Error('File Chinese translation incomplete');
   }
   const {bytes,response}=await this.request(`/v1/file-jobs/${jobId}/markdown`);
   if(!response.headers.get('content-type')?.startsWith('text/markdown')||hash(bytes)!==m.markdown?.sha256)throw Error('File Markdown integrity mismatch');

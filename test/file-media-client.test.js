@@ -6,6 +6,8 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import {FileMediaClient} from '../src/file-media-client.js';
+import {transcribeFile} from '../src/remote-file-media.js';
+import {freezeMedia} from '../src/media-files.js';
 import {openIngestion} from '../src/ingestion.js';
 const hash=x=>createHash('sha256').update(x).digest('hex');
 async function fixture(){
@@ -30,9 +32,21 @@ test('real upload and durable CLI workflow reuse the original job, freeze transc
   const config={stateDir:join(root,'state'),python:'/usr/bin/python3',mediaServiceUrl:f.url,mediaServiceTokenFile:token};let service=await openIngestion(config);
   const job=await service.submit({file,mode:'convert'}),done=await service.run(job.id);assert.equal(done.status,'converted',done.failure);assert.match(await readFile(done.bundle.markdown,'utf8'),/最后一句/);
   service=await openIngestion(config);assert.equal((await service.run(job.id)).status,'converted');assert.equal(f.submits,1);assert.equal(f.uploads,1);assert.equal(await readFile(file,'utf8'),'synthetic audio bytes');
+  const renamed=join(root,'renamed.wav');await writeFile(renamed,'synthetic audio bytes');const refreshed=await service.submit({file:renamed,mode:'convert',refresh:true});assert.equal((await service.run(refreshed.id)).status,'converted');assert.equal(f.submits,1);assert.equal(f.uploads,1);
   const client=new FileMediaClient({baseUrl:f.url,token:'synthetic-secret'});
   f.manifest.input={...f.input,source:{...f.input.source,id:'wrong'}};await assert.rejects(client.fileResult(f.jobId,f.input),/binding/);f.manifest.input=f.input;
   f.manifest.segments[0].end=1;await assert.rejects(client.fileResult(f.jobId,f.input),/head\/tail/);f.manifest.segments[0].end=12;
   f.manifest.media.audio.path='/v1/file-media/'+'c'.repeat(32)+'/audio';await assert.rejects(client.fileResult(f.jobId,f.input),/metadata/);
+ }finally{await f.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('platform signature and acquisition evidence changes retain the original media job and input',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-media-identity-'))),f=await fixture();
+ try{
+  const path=join(root,'video.mp4'),token=join(root,'token');await writeFile(path,'synthetic media bytes');await writeFile(token,'synthetic-secret',{mode:0o600});
+  const config={stateDir:join(root,'state'),python:'/usr/bin/python3',mediaServiceUrl:f.url,mediaServiceTokenFile:token},file=await freezeMedia(path,join(root,'input'));
+  const source={platform:'x',id:'123',url:'https://x.com/example/status/123',asset_id:'123-video-1',title:'First evidence',acquisition_sha256:'a'.repeat(64)};
+  const first=await transcribeFile({file,source,config});const second=await transcribeFile({file,source:{...source,asset_id:'123-video-asset1',title:'Refreshed evidence',acquisition_sha256:'b'.repeat(64)},config,resume:true});
+  assert.equal(first.remoteJobId,second.remoteJobId);assert.equal(f.submits,1);assert.equal(f.uploads,1);assert.equal(second.manifest.input.source.acquisition_sha256,source.acquisition_sha256);
  }finally{await f.close();await rm(root,{recursive:true,force:true});}
 });

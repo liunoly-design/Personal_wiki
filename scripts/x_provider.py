@@ -190,7 +190,9 @@ def capture(url, output):
         result = [body, '\n来源：'+canonical]
         for photo in (post.get('media') or {}).get('photos', []):result.append(image(photo['url']))
         for index,video in enumerate((post.get('media') or {}).get('videos',[])):
-            asset_id=str(post['id'])+'-video-'+str(index+1)
+            media_id=video.get('id')
+            if not isinstance(media_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',media_id):raise ValueError('X video media identity missing')
+            asset_id=str(post['id'])+'-video-'+media_id
             asset={'kind':'video','source_id':str(post['id']),'source_url':canonical,'asset_id':asset_id,'path':'videos/'+asset_id+'.mp4'}
             formats=[f for f in video.get('formats',[]) if f.get('container')=='mp4' and f.get('url') and min(f.get('width',0),f.get('height',0))<=1080]
             formats.sort(key=lambda f:(f.get('width',0)*f.get('height',0),f.get('bitrate',0)),reverse=True)

@@ -9,19 +9,19 @@ from pathlib import Path
 def deploy(service,expected,activate=False):
  active=service/'active-release.json';prior=json.loads(active.read_text())
  if prior['release_id']!=expected:raise RuntimeError('Active release changed; inspect before deploy')
- base=Path(prior['release']);extension=Path(__file__).with_name('generic_media.py');body=extension.read_bytes()
- release_id='0.8.0-file-'+hashlib.sha256(body).hexdigest()[:12];target=service/'releases'/release_id
+ base=Path(prior['release']);extension=Path(__file__).with_name('generic_media.py');body=extension.read_bytes();translator=extension.with_name('translate_generic.py');translation_body=translator.read_bytes();policy=extension.with_name('transcript-identifiers.json');policy_body=policy.read_bytes();json.loads(policy_body)
+ release_id='0.8.0-file-'+hashlib.sha256(body+translation_body+policy_body).hexdigest()[:12];target=service/'releases'/release_id
  gateway=(base/'gateway.py').read_text()
  anchor='import ai_articles\n'
  if gateway.count(anchor)!=1:raise RuntimeError('Unknown gateway integration point')
  if 'register_file_media(api,ai_articles)' not in gateway:gateway=gateway.replace(anchor,anchor+"sys.path.insert(0,str(RELEASE))\nfrom generic_media import register as register_file_media\nregister_file_media(api,ai_articles)\n")
- compile(body,str(extension),'exec');compile(gateway,'gateway.py','exec')
+ compile(body,str(extension),'exec');compile(translation_body,str(translator),'exec');compile(gateway,'gateway.py','exec')
  if not target.exists():
   shutil.copytree(base,target)
-  (target/'generic_media.py').write_bytes(body);(target/'gateway.py').write_text(gateway)
-  meta=json.loads((target/'release.json').read_text());meta.update(version='0.8.0',release_id=release_id,build_sha256=hashlib.sha256(body+gateway.encode()).hexdigest(),generic_base_release=expected)
+  (target/'generic_media.py').write_bytes(body);(target/'translate_generic.py').write_bytes(translation_body);(target/'transcript-identifiers.json').write_bytes(policy_body);(target/'gateway.py').write_text(gateway)
+  meta=json.loads((target/'release.json').read_text());meta.update(version='0.8.0',release_id=release_id,build_sha256=hashlib.sha256(body+translation_body+policy_body+gateway.encode()).hexdigest(),generic_base_release=expected)
   (target/'release.json').write_text(json.dumps(meta,indent=2)+'\n')
- elif (target/'generic_media.py').read_bytes()!=body or (target/'gateway.py').read_text()!=gateway:raise RuntimeError('Release collision')
+ elif (target/'generic_media.py').read_bytes()!=body or (target/'translate_generic.py').read_bytes()!=translation_body or (target/'transcript-identifiers.json').read_bytes()!=policy_body or (target/'gateway.py').read_text()!=gateway:raise RuntimeError('Release collision')
  if activate:
   data=Path(os.environ.get('DOUYIN2TEXT_DATA_DIR','/Users/mac/Documents/Personal-Wiki-Media'))
   c=sqlite3.connect((data/'state/v1.sqlite3').as_uri()+'?mode=ro',uri=True)

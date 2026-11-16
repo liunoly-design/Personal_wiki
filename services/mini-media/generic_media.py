@@ -19,6 +19,16 @@ def digest(path):
  with path.open('rb') as f:
   for b in iter(lambda:f.read(1024*1024),b''):h.update(b)
  return h.hexdigest()
+def safe_location(path,root):
+ path,root=Path(path).absolute(),Path(root).absolute()
+ if not path.is_relative_to(root):raise ValueError('Artifact outside data root')
+ current=path
+ while True:
+  if current.is_symlink():raise ValueError('Artifact ancestor symlink rejected')
+  if current==root:break
+  current=current.parent
+ if not path.resolve().is_relative_to(root.resolve()):raise ValueError('Artifact outside data root')
+ return path
 def immutable(path,body):
  path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
  temporary=path.parent/('.immutable-'+secrets.token_hex(12))
@@ -73,11 +83,31 @@ def coverage(raw,duration):
  if segments[0]['start']>10 or duration-segments[-1]['end']>10:raise ValueError('Transcript head/tail incomplete')
  return {'first_start':segments[0]['start'],'last_end':segments[-1]['end'],'segments':len(segments),'head_tail_verified':True}
 
+def chinese_delivery(segments,originals=None):
+ policy=json.loads(Path(__file__).with_name('transcript-identifiers.json').read_text());identifiers=set(policy['identifiers']);preserved=[]
+ if not any(re.search(r'[\u3400-\u9fff]',s['text']) for s in segments):raise ValueError('Chinese delivery missing')
+ for i,s in enumerate(segments):
+  text=re.sub(r'https?://\S+','',s['text'])
+  if originals and all(s[k]==originals[i][k] for k in ('start','end')):
+   for token in sorted(identifiers,key=len,reverse=True):
+    pattern=r'(?<![A-Za-z0-9_])'+re.escape(token)+r'(?![A-Za-z0-9_])'
+    if re.search(pattern,text) and re.search(pattern,originals[i]['text']):
+     preserved.append({'index':i,'token':token,'source_text':originals[i]['text'],'target_text':s['text'],'start':s['start'],'end':s['end']});text=re.sub(pattern,'',text)
+  if originals and all(s[k]==originals[i][k] for k in ('start','end')):
+   for literal in re.findall(policy['pronunciation'],originals[i]['text']):
+    if literal in text:preserved.append({'index':i,'kind':'pronunciation','token':literal,'source_text':originals[i]['text'],'target_text':s['text'],'start':s['start'],'end':s['end']});text=text.replace(literal,'')
+  latin=len(re.findall(r'[A-Za-z]',text));han=len(re.findall(r'[\u3400-\u9fff]',text))
+  if latin>3 and latin>han:raise ValueError('Chinese delivery incomplete; mixed-language prose retained for translation')
+ return preserved
+
 def register(api,articles=None):
  data=api.DATA
  def directory(jid):
   if not re.fullmatch(r'[a-f0-9]{32}',jid):api.fail(404,'NOT_FOUND','Job not found')
-  p=data/'file-jobs'/jid;p.mkdir(parents=True,exist_ok=True,mode=0o700);return p
+  p=data/'file-jobs'/jid
+  try:safe_location(p,data);p.mkdir(parents=True,exist_ok=True,mode=0o700);safe_location(p,data)
+  except ValueError:api.fail(409,'UNSAFE_PATH','Regular artifact directories required')
+  return p
  def request_for(jid):
   j=api.get(jid);r=json.loads(j['request_json'])
   if r.get('kind')!='file':api.fail(404,'NOT_FOUND','File job not found')
@@ -91,7 +121,7 @@ def register(api,articles=None):
  def verify(m):
   if m.get('kind')!='file':raise ValueError('Invalid file result')
   for f in m['files'].values():
-   p=data/f['path']
+   p=safe_location(data/f['path'],data)
    if p.is_symlink() or not p.is_file() or p.stat().st_size!=f['bytes'] or digest(p)!=f['sha256']:raise ValueError('File artifact integrity mismatch')
   if m['files']['original']['sha256']!=m['input']['file']['sha256'] or m['files']['original']['bytes']!=m['input']['file']['bytes']:raise ValueError('Original binding mismatch')
   if m['verification']['original']['full_decode'] is not True or m['verification']['audio']['full_decode'] is not True:raise ValueError('Decode proof missing')
@@ -123,8 +153,10 @@ def register(api,articles=None):
   return JSONResponse({'api_version':'1','job_id':j['id'],'status':j['status'],'reused':reused},status_code=200 if reused else 202)
  @api.app.put('/v1/file-jobs/{jid}/content',dependencies=[Depends(api.auth)])
  async def upload(jid:str,request:Request):
-  j,body=request_for(jid);p=directory(jid);f=body['file'];target=p/('source'+f['extension'])
-  with (p/'upload.lock').open('a') as lock:
+  j,body=request_for(jid);p=directory(jid);f=body['file']
+  try:target=safe_location(p/('source'+f['extension']),data);part=safe_location(p/'upload.part',data);lock_path=safe_location(p/'upload.lock',data)
+  except ValueError:api.fail(409,'UNSAFE_PATH','Regular artifact files required')
+  with os.fdopen(os.open(lock_path,os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600),'a') as lock:
    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
    except BlockingIOError:api.fail(409,'UPLOAD_BUSY','Upload active',True)
    if target.exists():
@@ -132,8 +164,8 @@ def register(api,articles=None):
     # A crash between the immutable rename and queue transaction is recoverable.
    else:
     if j['status']!='waiting_upload':api.fail(409,'INVALID_STATE','Upload not expected')
-    part=p/'upload.part';sha=hashlib.sha256();size=0
-    with part.open('wb') as out:
+    sha=hashlib.sha256();size=0
+    with os.fdopen(os.open(part,os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o600),'wb') as out:
      os.chmod(part,0o600)
      async for chunk in request.stream():
       size+=len(chunk)
@@ -173,7 +205,7 @@ def register(api,articles=None):
  def dispatch_evidence(m):return verify(m) if m.get('kind')=='file' else old_evidence(m)
  def dispatch_snapshot(m):
   if m.get('kind')!='file':return old_snapshot(m)
-  verify(m);aid='file_'+m['media_id'];immutable(data/'metadata'/'v1'/(aid+'.json'),json_bytes(m));return aid,m
+  verify(m);aid='file_'+m['media_id'];target=safe_location(data/'metadata'/'v1'/(aid+'.json'),data);immutable(target,json_bytes(m));return aid,m
  api.process=dispatch;api.evidence=dispatch_evidence;api.snapshot=dispatch_snapshot
  # Generic transcripts are compiled by LLM Wiki, never the service's optional AI enrichment.
  if articles:
@@ -183,7 +215,10 @@ def register(api,articles=None):
 
 async def process_file(job,body,p,api,stage):
  from douyin2text.providers.registry import asr_provider
- original=p/('source'+body['file']['extension']);cfg=api.CONFIG
+ original=safe_location(p/('source'+body['file']['extension']),api.DATA);cfg=dict(api.CONFIG)
+ translator=Path(__file__).with_name('translate_generic.py');cfg['output_fingerprint']=hashlib.sha256((cfg['output_fingerprint']+digest(translator)+digest(Path(__file__).with_name('transcript-identifiers.json'))+'generic-output-v1').encode()).hexdigest()
+ def store(path,value):return immutable(safe_location(path,api.DATA),value)
+ for entry in p.iterdir():safe_location(entry,api.DATA)
  if original.is_symlink() or digest(original)!=body['file']['sha256'] or original.stat().st_size!=body['file']['bytes']:raise ValueError('Input integrity mismatch')
  if (p/'result.json').exists():
   m=json.loads((p/'result.json').read_text())
@@ -202,8 +237,8 @@ async def process_file(job,body,p,api,stage):
  await command([ffmpeg,'-nostdin','-v','error','-xerror','-err_detect','explode','-protocol_whitelist','file,pipe','-format_whitelist',FORMATS,'-i',str(original),'-map','0:a:0','-map','0:v:0?','-f','null','-'])
  audio=p/'audio.wav';audio_binding=p/'audio.binding.json'
  if not audio.exists():
-  part=p/'audio.part.wav';await command([ffmpeg,'-nostdin','-y','-v','error','-protocol_whitelist','file,pipe','-format_whitelist',FORMATS,'-i',str(original),'-map','0:a:0','-vn','-ac','1','-ar','16000','-c:a','pcm_s16le',str(part)])
-  immutable(audio_binding,json_bytes({'input_sha256':digest(original),'audio_sha256':digest(part)}));os.link(part,audio);part.unlink()
+  part=safe_location(p/'audio.part.wav',api.DATA);await command([ffmpeg,'-nostdin','-y','-v','error','-protocol_whitelist','file,pipe','-format_whitelist',FORMATS,'-i',str(original),'-map','0:a:0','-vn','-ac','1','-ar','16000','-c:a','pcm_s16le',str(part)])
+  store(audio_binding,json_bytes({'input_sha256':digest(original),'audio_sha256':digest(part)}));os.link(part,audio);part.unlink()
  if not audio_binding.exists() or json.loads(audio_binding.read_text())!={'input_sha256':digest(original),'audio_sha256':digest(audio)}:raise ValueError('Audio input binding mismatch')
  await command([ffmpeg,'-nostdin','-v','error','-xerror','-i',str(audio),'-f','null','-'])
  ap=json.loads(await command([ffprobe,'-v','error','-show_format','-of','json',str(audio)],60));aduration=float(ap['format']['duration'])
@@ -214,32 +249,36 @@ async def process_file(job,body,p,api,stage):
  if checkpoint.exists():
   bind=json.loads(checkpoint.read_text())
   if any(bind.get(k)!=v for k,v in binding.items()):raise ValueError('ASR checkpoint input mismatch')
-  if not raw_path.exists() and 'raw' in bind:immutable(raw_path,json_bytes(bind['raw']))
+  if not raw_path.exists() and 'raw' in bind:store(raw_path,json_bytes(bind['raw']))
   if not raw_path.exists() or bind.get('raw_sha256')!=digest(raw_path):raise ValueError('ASR checkpoint mismatch')
   raw=json.loads(raw_path.read_text())
  elif raw_path.exists():raise ValueError('ASR checkpoint binding missing; original retained')
  else:
   provider=asr_provider(cfg);transcript=await asyncio.wait_for(provider.transcribe(audio),timeout=7200);raw=transcript.as_dict()
   raw_bytes=json_bytes(raw)
-  immutable(checkpoint,json_bytes({**binding,'raw_sha256':hashlib.sha256(raw_bytes).hexdigest(),'raw':raw}))
-  immutable(raw_path,raw_bytes)
+  store(checkpoint,json_bytes({**binding,'raw_sha256':hashlib.sha256(raw_bytes).hexdigest(),'raw':raw}))
+  store(raw_path,raw_bytes)
  cov=coverage(raw,duration);delivered=raw['segments'];translation=None
  if raw.get('language') not in ('zh','chinese'):
+  if raw.get('language') not in ('en','english'):raise ValueError('Local translation supports English only; original retained')
   trcfg=cfg.get('translation',{})
   if not trcfg.get('enabled'):raise ValueError('Local Chinese translation not configured')
   stage('translating',media_id=job['id']);tr=p/('translation-'+cfg['output_fingerprint'][:12]+'.json')
-  if not tr.exists():await command([str(trcfg['python']),str(trcfg['script']),str(raw_path),str(tr)],1800)
+  if not tr.exists():await command([str(trcfg['python']),str(translator),str(raw_path),str(tr),str(trcfg['script'])],1800)
   result=json.loads(tr.read_text());delivered=result.get('segments',[])
-  if result.get('source_transcript_sha256')!=digest(raw_path) or result.get('model_sha256')!=trcfg['sha256'] or len(delivered)!=len(raw['segments']) or any(t.get('start')!=s['start'] or t.get('end')!=s['end'] or not t.get('text','').strip() for s,t in zip(raw['segments'],delivered)):raise ValueError('Translation coverage mismatch')
+  if result.get('source_language')!='en' or result.get('target_language')!='zh' or result.get('source_transcript_sha256')!=digest(raw_path) or result.get('model_sha256')!=trcfg['sha256'] or len(delivered)!=len(raw['segments']) or any(t.get('start')!=s['start'] or t.get('end')!=s['end'] or not t.get('text','').strip() for s,t in zip(raw['segments'],delivered)):raise ValueError('Translation coverage mismatch')
   translation={k:v for k,v in result.items() if k not in ('segments','text','raw_model_outputs')}
- if not re.search(r'[\u3400-\u9fff]',''.join(s['text'] for s in delivered)):raise ValueError('Chinese delivery missing')
+ cov['preserved_identifiers']=chinese_delivery(delivered,raw['segments'])
  def stamp(x):
   ms=round(x*1000);return f'{ms//3600000:02}:{ms//60000%60:02}:{ms//1000%60:02}.{ms%1000:03}'
  def lines(ss):return '\n\n'.join(f"[{stamp(s['start'])} → {stamp(s['end'])}] {s['text'].strip()}" for s in ss)
  text='# '+body['source']['title'].replace('\n',' ')+'\n\n> 完整机器转写'+('及本地机器中文翻译' if translation else '')+'；未经人工校订。\n\n来源：'+body['source']['url']+'\n\n## 完整中文正文\n\n'+lines(delivered)+'\n\n## 完整原始转写\n\n'+lines(raw['segments'])+'\n'
- md=p/('transcript-'+cfg['output_fingerprint'][:12]+'.md');immutable(md,text.encode())
+ md=p/('transcript-'+cfg['output_fingerprint'][:12]+'.md');store(md,text.encode())
  def record(path):return {'path':str(path.relative_to(api.DATA)),'sha256':digest(path),'bytes':path.stat().st_size}
  model=cfg['model'];asr={'engine':'whisper.cpp','model':model['name'],'model_sha256':model['sha256'],'fingerprint':cfg['asr_fingerprint'],'language':raw['language'],'elapsed_seconds':round(time.monotonic()-t,3)}
  m={'kind':'file','media_id':job['id'],'versioned_media_id':'file_'+job['id'],'input':body,'duration_seconds':duration,'asr':asr,'output_fingerprint':cfg['output_fingerprint'],'raw':raw,'delivered_segments':delivered,'translation':translation,'coverage':cov,'verification':{'input_sha256':digest(original),'original':{'full_decode':True,'duration_seconds':duration},'audio':{'full_decode':True,'duration_seconds':aduration},'source_binding':'client_acquisition_claim'},'files':{'original':record(original),'audio':record(audio),'raw_transcript':record(raw_path),'markdown':record(md)},'mime':{'original':mimetypes.guess_type(original)[0] or 'application/octet-stream','audio':'audio/wav'}}
- if translation:m['files']['raw_translation']=record(tr)
- immutable(p/'result.json',json_bytes(m));return m
+ if translation:
+  m['files']['raw_translation']=record(tr)
+  audit=tr.with_suffix('.revisions.json')
+  if audit.exists():m['files']['translation_revisions']=record(audit)
+ store(p/'result.json',json_bytes(m));return m

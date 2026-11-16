@@ -1,0 +1,19 @@
+{
+  "identifiers": [
+    "AI",
+    "API",
+    "CLI",
+    "Codex",
+    "ChatGPT",
+    "OpenAI",
+    "GPT",
+    "Python",
+    "JavaScript",
+    "TypeScript",
+    "GitHub",
+    "Markdown",
+    "MLX",
+    "Whisper"
+  ],
+  "pronunciation": "\\bpronounced\\s+[\"“]([A-Za-z]+(?:-[A-Za-z]+){1,10})[.!?]?[\"”]"
+}

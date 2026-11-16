@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from fastapi import FastAPI,HTTPException,Request
 from fastapi.testclient import TestClient
-from generic_media import register,coverage,immutable
+from generic_media import register,coverage,immutable,chinese_delivery
 
 class UploadTests(unittest.TestCase):
  def setUp(self):
@@ -43,6 +43,18 @@ class UploadTests(unittest.TestCase):
   self.assertEqual(self.submit().json()['job_id'],jid)
   self.assertEqual(self.client.put('/v1/file-jobs/'+jid+'/content',headers=self.headers,content=self.content).status_code,200)
   self.assertEqual(next((self.data/'file-jobs'/jid).glob('source.*')).read_bytes(),self.content)
+ def test_symlink_directory_cannot_write_outside_data(self):
+  jid=self.submit().json()['job_id'];(self.data/'file-jobs').mkdir(exist_ok=True)
+  with tempfile.TemporaryDirectory() as outside:
+   (self.data/'file-jobs'/jid).symlink_to(outside,target_is_directory=True)
+   r=self.client.put('/v1/file-jobs/'+jid+'/content',headers=self.headers,content=self.content)
+   self.assertEqual(r.status_code,409);self.assertEqual(list(Path(outside).iterdir()),[])
+ def test_upload_part_symlink_preserves_external_original(self):
+  jid=self.submit().json()['job_id'];p=self.data/'file-jobs'/jid;p.mkdir(parents=True)
+  with tempfile.TemporaryDirectory() as outside:
+   original=Path(outside)/'human.wav';original.write_bytes(b'human original');(p/'upload.part').symlink_to(original)
+   r=self.client.put('/v1/file-jobs/'+jid+'/content',headers=self.headers,content=self.content)
+   self.assertEqual(r.status_code,409);self.assertEqual(original.read_bytes(),b'human original')
  def test_conflicts_limits_and_source_identity(self):
   self.assertEqual(self.submit().status_code,202)
   self.body['source']['title']='different';self.assertEqual(self.submit().status_code,409)
@@ -54,6 +66,13 @@ class ProofTests(unittest.TestCase):
   for raw in [{}, {'text':'[Music]','segments':[{'start':0,'end':39,'text':'[Music]'}]}, {'text':'尾段','segments':[{'start':30,'end':40,'text':'尾段'}]}, {'text':'开头','segments':[{'start':0,'end':4,'text':'开头'}]}, {'text':'乱序','segments':[{'start':0,'end':18,'text':'一'},{'start':4,'end':20,'text':'二'}]}]:
    with self.assertRaises(ValueError):coverage(raw,40)
   self.assertTrue(coverage({'text':'完整','segments':[{'start':0,'end':39,'text':'完整'}]},40)['head_tail_verified'])
+ def test_mixed_language_cannot_be_labelled_complete_chinese(self):
+  with self.assertRaisesRegex(ValueError,'incomplete'):chinese_delivery([{'text':'中文开头。'},{'text':'This whole sentence has not been translated.'}])
+  chinese_delivery([{'text':'完整中文，包括 AI 等技术标识。'}])
+  original=[{'start':0,'end':1,'text':'中文。'},{'start':1,'end':2,'text':'ChatGPT'}];self.assertEqual(chinese_delivery(original,original)[0]['token'],'ChatGPT')
+  with self.assertRaises(ValueError):chinese_delivery(original,[original[0],{'start':1,'end':2,'text':'AnotherWord'}])
+  self.assertTrue(chinese_delivery([{'start':0,'end':2,'text':'用ChatGPT。'}],[{'start':0,'end':2,'text':'Use ChatGPT.'}]))
+  phonetic=chinese_delivery([{'start':0,'end':2,'text':'它读作“fran-ja-pan”。'}],[{'start':0,'end':2,'text':'It is pronounced \"fran-ja-pan.\"'}]);self.assertEqual(phonetic[0]['kind'],'pronunciation')
  def test_immutable_artifact_replay_preserves_human_bytes(self):
   with tempfile.TemporaryDirectory() as temp:
    p=Path(temp)/'original.json';immutable(p,b'original');immutable(p,b'original')
