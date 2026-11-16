@@ -26,6 +26,45 @@ test('AI can convert text, inspect its durable task and reuse it without touchin
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('parallel same-platform failures remain attached to one maintenance request',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-aggregate-')));
+ try{
+  let arrivals=0,release;const barrier=new Promise(r=>release=r);
+  const service=await openIngestion({stateDir:join(root,'state'),python:'/usr/bin/python3'},{capture:async({job})=>{
+   if(job.rounds===2){if(++arrivals===2)release();await barrier;}throw Error('Synthetic source parser failure');
+  }});
+  const a=await service.submit({input:'https://x.com/example/status/101',mode:'convert'}),b=await service.submit({input:'https://x.com/example/status/102',mode:'convert'});
+  const jobs=await Promise.all([service.run(a.id),service.run(b.id)]);
+  assert.equal(jobs[0].maintenance.id,jobs[1].maintenance.id);
+  const request=await service.maintain(a.id);
+  assert.deepEqual(request.tasks.sort(),[a.id,b.id].sort());
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('unsupported platforms stay pending without automatic development, and speculative login errors still recover twice',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-route-fail-')));
+ try{
+  const service=await openIngestion({stateDir:join(root,'state'),python:'/usr/bin/python3'},{capture:async()=>{throw Error('WeChat capture failed; inspect local fetch.log, login may be required');}});
+  const other=await service.submit({input:'https://www.kuaishou.com/short-video/synthetic',mode:'convert'});
+  const pending=await service.run(other.id);assert.equal(pending.status,'pending');assert.equal(pending.nextAction,'source_support_planned');assert.equal(pending.maintenance,undefined);
+  const known=await service.submit({input:'https://mp.weixin.qq.com/s/synthetic',mode:'convert'});
+  const repaired=await service.run(known.id);assert.equal(repaired.status,'pending');assert.equal(repaired.rounds,2);assert.ok(repaired.maintenance);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('a process interruption in the second round recovers into pending rather than permanent processing',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-crash-')));
+ try{
+  const config={stateDir:join(root,'state'),python:'/usr/bin/python3'};
+  const service=await openIngestion(config),job=await service.submit({input:'https://x.com/example/status/555',mode:'convert'});
+  const moduleURL=new URL('../src/ingestion.js',import.meta.url).href;
+  const script=`import {openIngestion} from ${JSON.stringify(moduleURL)};const s=await openIngestion(${JSON.stringify(config)},{capture:async({job})=>{if(job.rounds===2)process.exit(9);throw Error('synthetic first round failure')}});await s.run(${JSON.stringify(job.id)});`;
+  await assert.rejects(exec(process.execPath,['--input-type=module','-e',script]));
+  await new Promise(r=>setTimeout(r,100));
+  const recovered=await service.run(job.id);assert.equal(recovered.status,'pending');assert.equal(recovered.rounds,2);assert.ok(recovered.maintenance);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('incomplete WeChat is pending after two rounds and supplied full text resumes the same task',async()=>{
  const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-pending-')));
  try{

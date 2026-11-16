@@ -79,7 +79,11 @@ def capture(url, output, browser_profile=None):
         cmd=[str(Path(sys.executable).parent/'magicmd'),'convert',url,'--config',str(config),'--output',str(out/'packages'),'--debug']
         r=subprocess.run(cmd,capture_output=True,text=True,timeout=180)
         (out/'fetch.log').write_text(r.stdout+r.stderr)
-        if r.returncode:raise ValueError('WeChat capture failed; inspect local fetch.log, login may be required')
+        if r.returncode:
+            diagnostic=(r.stdout+r.stderr).lower()
+            if any(reason in diagnostic for reason in ('login required','authentication required','captcha required','captcha detected','http 401','http 403')):
+                raise ValueError('WeChat authentication/captcha required; inspect local fetch.log')
+            raise ValueError('WeChat capture failed; inspect retained fetch.log for network/parser diagnosis')
         articles=list((out/'packages').glob('*/article.md'))
         if len(articles)!=1:raise ValueError('Expected one WeChat article')
         directory=articles[0].parent

@@ -7,7 +7,7 @@ import {collectCanonical,verifyPublication} from './canonical-library.js';
 import {localNashsuAPI} from './nashsu-api.js';
 import {validSlug} from './wk.js';
 import {identifyInput,inputURLs,captureArticle} from './source-acquisition.js';
-import {startMaintenance,repairIngestion} from './ingestion-maintenance.js';
+import {startMaintenance,repairIngestion,updateMaintenance} from './ingestion-maintenance.js';
 import {MediaServiceClient} from './media-service-client.js';
 import {hostname} from 'node:os';
 import {execFile} from 'node:child_process';
@@ -84,24 +84,32 @@ export async function openIngestion(config,ports={}){
  function waitReason(message){
   if(/quota|capacity|额度/iu.test(message))return 'waiting_capacity';
   if(/confirmation|超过|1.?GB|30.?minutes/iu.test(message))return 'waiting_confirmation';
-  if(/login|captcha|登录|验证码|HTTP 401|HTTP 403/iu.test(message))return 'waiting_login';
+  if(/waiting_login|(?:login|captcha|authentication).{0,20}(?:required|expired|detected)|(?:登录|验证码).{0,8}(?:失效|需要|出现)|HTTP 401|HTTP 403/iu.test(message.replace(/login may be required/giu,'')))return 'waiting_login';
   if(/transcription required|not configured/iu.test(message))return 'waiting_dependency';
   return null;
  }
  async function maintenance(job){
+  if(!['x','wechat','douyin','text'].includes(job.platform)){job.nextAction='source_support_planned';return;}
   const fingerprint=hash(job.platform+':'+(config.processorVersion??'1')+':'+(job.maintenanceGeneration??0)+':'+job.failure.replace(/https?:\/\/\S+/gu,'[source]').slice(0,200));
-  const file=join(root,'maintenance',fingerprint+'.json');
-  const request=await optionalJSON(file)??{id:fingerprint,platform:job.platform,status:'waiting_bridge',tasks:[],createdAt:new Date().toISOString()};
-  if(!request.tasks.includes(job.id))request.tasks.push(job.id);
-  request.reason=job.failure.replace(/https?:\/\/\S+/gu,'[source]').slice(0,1200);
-  await saveJSON(file,request);job.maintenance={id:request.id,status:request.status};
-  if(request.status==='waiting_bridge'&&config.maintenance?.project&&config.configPath){request.status='queued';await saveJSON(file,request);if(!startMaintenance(config,request.id)){request.status='waiting_bridge';await saveJSON(file,request);}job.maintenance.status=request.status;}
+  let launch=false;
+  const request=await updateMaintenance(config,fingerprint,previous=>{
+   const request=previous??{id:fingerprint,platform:job.platform,status:'waiting_bridge',tasks:[],createdAt:new Date().toISOString()};
+   if(!request.tasks.includes(job.id))request.tasks.push(job.id);
+   request.reason=job.failure.replace(/https?:\/\/\S+/gu,'[source]').slice(0,1200);
+   if(request.status==='waiting_bridge'&&config.maintenance?.project&&config.configPath){request.status='queued';launch=true;}
+   return request;
+  });
+  job.maintenance={id:request.id,status:request.status};
+  if(launch&&!startMaintenance(config,request.id))await updateMaintenance(config,request.id,r=>({...r,status:'waiting_bridge'}));
  }
  async function finished(job){
   delete job.failure;await persist(job);
   if(job.maintenance){
-   const file=join(root,'maintenance',job.maintenance.id+'.json'),request=await optionalJSON(file);
-   if(request){request.resolvedTasks=[...new Set([...(request.resolvedTasks??[]),job.id])];if(request.tasks.every(id=>request.resolvedTasks.includes(id)))request.status='source_recovered';await saveJSON(file,request);}
+   await updateMaintenance(config,job.maintenance.id,request=>{
+    request.resolvedTasks=[...new Set([...(request.resolvedTasks??[]),job.id])];
+    if(request.tasks.every(id=>request.resolvedTasks.includes(id))&&!['queued','starting','running'].includes(request.status))request.status='source_recovered';
+    return request;
+   });
   }
   return job;
  }
@@ -131,7 +139,7 @@ export async function openIngestion(config,ports={}){
     await persist(job);if(reason||job.status==='pending')return job;
    }
   }
-  if(!job.bundle)return job;
+  if(!job.bundle){job.status='pending';job.failure??='Processing interrupted after the second recovery round; materials retained';await maintenance(job);await persist(job);return job;}
   await verifyBundle(job.bundle);
   if(job.mode==='convert'){job.status='converted';return finished(job);}
   if(job.mode==='record'){

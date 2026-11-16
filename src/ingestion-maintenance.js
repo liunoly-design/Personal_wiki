@@ -4,7 +4,17 @@ import {readFile,mkdir,appendFile,rename,symlink,rm,lstat} from 'node:fs/promise
 import {join,resolve,isAbsolute} from 'node:path';
 import {saveJSON,optionalJSON} from './durable-files.js';
 import {acquireQueueLease} from './task-queue.js';
+import {createHash} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
 const exec=promisify(execFile);
+
+export async function updateMaintenance(config,id,update){
+ if(!/^[a-f0-9]{64}$/u.test(id))throw Error('Invalid maintenance ID');
+ const root=join(config.stateDir,'ingestion','maintenance'),lock=join(root,'records',id);
+ await mkdir(lock,{recursive:true,mode:0o700});let release;
+ for(let attempt=0;attempt<40;attempt++){try{release=await acquireQueueLease(lock,config.python);break;}catch(error){if(!/already running/u.test(error.message)||attempt===39)throw error;await delay(25);}}
+ try{const file=join(root,id+'.json');const value=await update(await optionalJSON(file));await saveJSON(file,value);return value;}finally{await release();}
+}
 
 export async function activateRelease(config,project,version){
  if(!/^[a-f0-9]{40}$/u.test(version)||resolve(config.runtimeRoot??'')!==join(config.stateDir,'runtime'))throw Error('Private versioned runtimeRoot required');
@@ -31,19 +41,25 @@ export async function activateRelease(config,project,version){
 export async function repairIngestion(config,id){
  if(!/^[a-f0-9]{64}$/u.test(id))throw Error('Invalid maintenance ID');
  const root=join(config.stateDir,'ingestion','maintenance'),file=join(root,id+'.json');
- const request=await optionalJSON(file);if(!request)throw Error('Maintenance request not found');
+ let request=await optionalJSON(file);if(!request)throw Error('Maintenance request not found');
  const directory=join(root,id);await mkdir(directory,{recursive:true,mode:0o700});
  const release=await acquireQueueLease(directory,config.python);
+ let releaseProject;
+ const persist=async()=>{request=await updateMaintenance(config,id,latest=>({...latest,...request,tasks:[...new Set([...(latest?.tasks??[]),...request.tasks])],resolvedTasks:[...new Set([...(latest?.resolvedTasks??[]),...(request.resolvedTasks??[])])]}));};
  try{
   if(['verified','failed','running'].includes(request.status))return request;
   const project=config.maintenance?.project;
-  if(!isAbsolute(project??'')){request.status='waiting_bridge';await saveJSON(file,request);return request;}
+  if(!isAbsolute(project??'')){request.status='waiting_bridge';await persist();return request;}
   if(resolve(project)===resolve(import.meta.dirname,'..'))throw Error('Code repair requires a development checkout separate from the running release');
+  const projectLock=join(root,'projects',createHash('sha256').update(resolve(project)).digest('hex'));
+  await mkdir(projectLock,{recursive:true,mode:0o700});
+  try{releaseProject=await acquireQueueLease(projectLock,config.python);}catch{request.status='waiting_workspace';request.reason='Another maintenance session owns the development checkout';await persist();return request;}
+  request=await optionalJSON(file);
   const before=(await exec('git',['rev-parse','HEAD'],{cwd:project})).stdout.trim();
   if((await exec('git',['status','--porcelain'],{cwd:project})).stdout.trim()){
-   request.status='waiting_workspace';request.reason='Development checkout has uncommitted work; retained without concurrent edits';await saveJSON(file,request);return request;
+   request.status='waiting_workspace';request.reason='Development checkout has uncommitted work; retained without concurrent edits';await persist();return request;
   }
-  request.status='starting';request.baseline=before;await saveJSON(file,request);
+  request.status='starting';request.baseline=before;await persist();
   const output=join(directory,'response.md'),events=join(directory,'events.jsonl');
   const args=['-a','never','exec','--sandbox','workspace-write','--json','--output-last-message',output,...(config.compilerModel?['--model',config.compilerModel]:[]),'-'];
   let pending='',writes=Promise.resolve(),sessionId;
@@ -55,7 +71,7 @@ export async function repairIngestion(config,id){
     for(const line of lines){
      writes=writes.then(()=>appendFile(events,line+'\n',{mode:0o600}));
      try{const event=JSON.parse(line);if(event.type==='thread.started'&&typeof event.thread_id==='string'&&/^[a-zA-Z0-9-]{8,100}$/u.test(event.thread_id)){
-      sessionId=event.thread_id;request.sessionId=sessionId;request.status='running';writes=writes.then(()=>saveJSON(file,request));
+      sessionId=event.thread_id;request.sessionId=sessionId;request.status='running';writes=writes.then(persist);
      }}catch{}
     }
    });
@@ -71,7 +87,7 @@ export async function repairIngestion(config,id){
   if(after===before||(await exec('git',['status','--porcelain'],{cwd:project})).stdout.trim())throw Error('Repair must produce a committed, regression-verified version');
   request.status='verified';request.version=after;request.testsPassed=true;request.finishedAt=new Date().toISOString();
   const release=config.runtimeRoot?await activateRelease(config,project,after):null;
-  request.activated=Boolean(release);await saveJSON(file,request);
+  request.activated=Boolean(release);await persist();
   if(!release)return request;
   // Re-import the repaired checkout in fresh processes; keep the original IDs.
   for(const task of request.tasks){
@@ -80,8 +96,8 @@ export async function repairIngestion(config,id){
    await exec(process.execPath,[cli,'run',task,'--config',config.configPath],{timeout:3600000,maxBuffer:2*1024*1024});
   }
   return request;
- }catch(error){request.status='failed';request.reason=error.code==='ETIMEDOUT'?'Development session timed out':String(error.message).slice(0,1000);request.finishedAt=new Date().toISOString();await saveJSON(file,request);return request;}
- finally{await release();}
+ }catch(error){request.status='failed';request.reason=error.code==='ETIMEDOUT'?'Development session timed out':String(error.message).slice(0,1000);request.finishedAt=new Date().toISOString();await persist();return request;}
+ finally{await releaseProject?.();await release();}
 }
 
 export function startMaintenance(config,id){
