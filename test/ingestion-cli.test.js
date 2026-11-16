@@ -148,6 +148,17 @@ test('real subprocess failures aggregate without task output paths creating repa
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('nested Python diagnostics retain evidence but aggregate task-specific paths into one repair',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-nested-fail-')));
+ try{
+  const service=await openIngestion({stateDir:join(root,'state'),python:'/usr/bin/python3'},{capture:async({directory})=>exec('/usr/bin/python3',['-c','import subprocess,sys;subprocess.run(["/usr/bin/false",sys.argv[1]],check=True)',directory])});
+  const a=await service.submit({input:'https://example.org/first',mode:'convert'}),b=await service.submit({input:'https://example.org/second',mode:'convert'});
+  const jobs=await Promise.all([service.run(a.id),service.run(b.id)]);
+  assert.equal(jobs[0].maintenance.id,jobs[1].maintenance.id);assert.match(jobs[0].failure,/CalledProcessError/);
+  const evidence=await readFile(join(root,'state/ingestion/work',a.id,'failures/0-2.json'),'utf8');assert.match(evidence,/CalledProcessError/);assert.ok(evidence.includes(a.id));
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('unsupported platforms stay pending without automatic development, and speculative login errors still recover twice',async()=>{
  const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-route-fail-')));
  try{

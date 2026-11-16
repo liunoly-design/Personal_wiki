@@ -99,13 +99,14 @@ export async function openIngestion(config,ports={}){
  async function maintenance(job){
   if(job.maintenanceReplay){job.nextAction='maintenance_replay_failed';return;}
   if(!supportedSource(job.platform)){job.nextAction='source_support_planned';return;}
-  const fingerprint=hash(job.platform+':'+(config.processorVersion??'1')+':'+(job.maintenanceGeneration??0)+':'+job.failure.replace(/https?:\/\/\S+/gu,'[source]').slice(0,200));
+  const commonFailure=job.failure.replace(/https?:\/\/\S+/gu,'[source]').replaceAll(join(root,'work',job.id),'[task-work]').replaceAll(job.id,'[task]');
+  const fingerprint=hash(job.platform+':'+(config.processorVersion??'1')+':'+(job.maintenanceGeneration??0)+':'+commonFailure.slice(0,200));
   let launch=false;
   const request=await updateMaintenance(config,fingerprint,previous=>{
    const request=previous??{id:fingerprint,platform:job.platform,status:'waiting_bridge',tasks:[],createdAt:new Date().toISOString()};
    if(!request.tasks.includes(job.id))request.tasks.push(job.id);
    if(request.status==='source_recovered'&&!request.activated)request.status='waiting_bridge';
-   request.reason=job.failure.replace(/https?:\/\/\S+/gu,'[source]').slice(0,1200);
+   request.reason=commonFailure.slice(0,1200);
    if((request.status==='waiting_bridge'||['verified','source_recovered'].includes(request.status)&&request.activated)&&config.maintenance?.project&&config.configPath){if(!request.activated)request.status='queued';request.nextAttemptAt=Date.now()+60000;launch=true;}
    return request;
   });
