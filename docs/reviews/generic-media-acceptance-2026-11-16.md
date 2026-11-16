@@ -55,10 +55,15 @@ Standards 4项、Spec 3项均已修复并复核；两轴原最高项分别是目
 
 ## 最终部署与入口核验
 
-Mini 最终版本 `0.8.0-file-b5e457ecb418`，服务版本0.8.0；generic模块、通用MLX adapter、共用策略文件与已提交源码逐项SHA-256相同。客户端核心修复提交 `7ce3869ad609e3b09e96e54ff262c445ccad81a7`；后续原文字补料保护及最终报告均已提交，当前分支 HEAD 通过不可变 release 启用。
+Mini 最终版本 `0.8.0-file-b5e457ecb418`，服务版本0.8.0；generic模块、通用MLX adapter、共用策略文件与已提交源码逐项SHA-256相同。客户端核心修复提交 `7ce3869ad609e3b09e96e54ff262c445ccad81a7`；原文字补料保护已在执行代码提交 `51883b5d0632d93d6e33f2b3b8d3187736d29710` 中完成，并通过不可变 release 启用；之后的同步状态文档提交不改变执行代码。
 
 全局 personal-wiki skill 已同步新文件能力；launcher/worker 指向版本化 current，实际 `--help` 展示 `--file`，doctor 为 Wiki/media ready。使用已部署 launcher 对上表4个任务重新 run，全部返回 complete；另有原任务音视频补料实测也已 complete（来源卡 `generic-local-video`），再次核验原件、Wiki 回读及全文检索。私有验收回执在本次开发 checkout 的 `.local/generic-media-live/`，不进入 Git。
 
 当前完整交付中文与英文语音；其他语种、混合语音内未译英文整段、无语音及不完整稿保留待补。单文件限额和后续范围以规格为准。
 
-代码及报告已在本地当前分支提交。尝试同步 GitHub 时，Git 因 HTTPS 凭据不可用返回 `could not read Username`；没有执行强推、改写远端或把未推送称为已同步。该限制不影响已完成的本机 CLI、Mini 服务和 Wiki 入库部署。
+## GitHub 同步（2026-11-16）
+
+代码及报告已推送至 [codex/wiki-ingestion-cli](https://github.com/liunoly-design/Personal_wiki/tree/codex/wiki-ingestion-cli)，并设置远端跟踪。此前 HTTPS 缺少凭据的问题已解决：复用本机已有 SSH 密钥，确认账号为 `liunoly-design`，将本仓库 origin 切换至 `ssh://git@ssh.github.com:443/liunoly-design/Personal_wiki.git`，仓库级配置选用该密钥。
+
+SSH 主机指纹已对照 [GitHub 官方公布值](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)，连接使用 [GitHub 官方 SSH 443 入口](https://docs.github.com/en/authentication/troubleshooting-ssh/using-ssh-over-the-https-port)。已成功 fetch 和普通 push；验收报告可从该分支直接读取。实际密钥、凭据、原始媒体和运行回执继续留在本机私有目录。
+
