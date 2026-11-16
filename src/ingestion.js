@@ -9,6 +9,7 @@ import {validSlug} from './wk.js';
 import {identifyInput,inputURLs,captureArticle,supportedSource} from './source-acquisition.js';
 import {startMaintenance,repairIngestion,updateMaintenance} from './ingestion-maintenance.js';
 import {MediaServiceClient} from './media-service-client.js';
+import {freezeMedia,mediaExtension} from './media-files.js';
 import {hostname} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -47,18 +48,20 @@ export async function openIngestion(config,ports={}){
  const persist=job=>saveJSON(pathFor(job.id),job);
  async function status(id){const job=await optionalJSON(pathFor(id));if(!job)throw Error('Task not found');if(job.maintenance){const request=await optionalJSON(join(root,'maintenance',job.maintenance.id+'.json'));if(request)job.maintenance={id:request.id,status:request.status,...(request.sessionId?{sessionId:request.sessionId}:{})};}return job;}
  async function lock(name,fn){const dir=join(root,'locks',name);await privateDirectory(dir);const release=await acquireQueueLease(dir,config.python??'python3');try{return await fn();}finally{await release();}}
- async function submit({input,text,mode='record',requestId,name,background='',refresh=false}={}){
+ async function submit({input,text,file,mode='record',requestId,name,background='',refresh=false}={}){
   if(!['record','convert'].includes(mode))throw Error('Invalid processing mode');
   if(requestId!==undefined&&(typeof requestId!=='string'||!requestId.trim()||requestId.length>500))throw Error('Invalid request ID');
   if(typeof background!=='string')throw Error('Background must be text');
-  const source=identifyInput({input,text});
+  if(file!==undefined&&(text!==undefined||input))throw Error('Provide one input: file, text or URL');
+  const mediaFile=file!==undefined?await freezeMedia(file,join(root,'media-inputs')):undefined;
+  const source=mediaFile?{platform:'file',url:'https://file.personal-wiki.invalid/'+mediaFile.sha256,name:'media-'+mediaFile.sha256.slice(0,16)}:identifyInput({input,text});
   if(name&&!validSlug(name))throw Error('Invalid English source name');
   const id=hash(requestId??mode+':'+source.url+':'+background+(refresh?':'+randomUUID():''));
   const payloadHash=hash(JSON.stringify({mode,url:source.url,name:name??source.name,background,refresh}));
   return lock('ingress',async()=>{
    const prior=await optionalJSON(pathFor(id));if(prior){if(prior.payloadHash&&prior.payloadHash!==payloadHash)throw Error('Request identity conflict');if(source.fetchUrl&&source.fetchUrl!==prior.fetchUrl)return lock('source-'+hash(source.url),async()=>{const latest=await status(id);if(!latest.bundle){latest.fetchUrl=source.fetchUrl;latest.fetchHistory=[...(latest.fetchHistory??[]),{input,fetchUrl:source.fetchUrl,requestId:requestId??null,receivedAt:new Date().toISOString()}];await persist(latest);}return latest;});return prior;}
    const cached=!refresh?await optionalJSON(join(root,'bundles',hash(source.url)+'.json')):null;
-   const job={id,mode,payloadHash,input:text!==undefined?{text}:{input},name:name??source.name,platform:source.platform,url:source.url,...(source.fetchUrl?{fetchUrl:source.fetchUrl}:{}),background,refresh,status:'queued',rounds:0,createdAt:new Date().toISOString(),...(cached?{bundle:cached}:{})};
+   const job={id,mode,payloadHash,input:mediaFile?{file}:text!==undefined?{text}:{input},...(mediaFile?{mediaFile}:{}),name:name??source.name,platform:source.platform,url:source.url,...(source.fetchUrl?{fetchUrl:source.fetchUrl}:{}),background,refresh,status:'queued',rounds:0,createdAt:new Date().toISOString(),...(cached?{bundle:cached}:{})};
    await persist(job);return job;
   });
  }
@@ -99,7 +102,7 @@ export async function openIngestion(config,ports={}){
  async function maintenance(job){
   if(job.maintenanceReplay){job.nextAction='maintenance_replay_failed';return;}
   if(!supportedSource(job.platform)){job.nextAction='source_support_planned';return;}
-  const commonFailure=job.failure.replace(/https?:\/\/\S+/gu,'[source]').replaceAll(join(root,'work',job.id),'[task-work]').replaceAll(job.id,'[task]');
+  const commonFailure=job.failure.replace(/https?:\/\/\S+/gu,'[source]').replaceAll(join(root,'work',job.id),'[task-work]').replaceAll(job.id,'[task]').replace(/\b[a-f0-9]{32}\b/gu,'[remote-task]');
   const fingerprint=hash(job.platform+':'+(config.processorVersion??'1')+':'+(job.maintenanceGeneration??0)+':'+commonFailure.slice(0,200));
   let launch=false;
   const request=await updateMaintenance(config,fingerprint,previous=>{
@@ -163,7 +166,7 @@ export async function openIngestion(config,ports={}){
    const previous=await optionalJSON(join(root,'publications',hash(job.bundle.url)+'.json'));
    job.result=await collectCanonical({...config,api,stateDir:root,url:job.bundle.url,sourceName:job.name,background:job.background,requestId:job.id,refresh:job.refresh,previousResult:previous, isVideoPrepared:true,workspace:join(root,'work',id,'knowledge',String(job.generation??0)),preparedReadingModel:job.bundle.preparedReadingModel,
     capture:async()=>({directory:job.bundle.directory,text:await readFile(job.bundle.markdown,'utf8'),status:'complete'}),generate:ports.generate,translate:ports.translate,
-    sourceContext:job.supplementFile?'正文由用户补充，原平台获取未核实；补料与原链接属于同一来源，不得声称网络抓取成功。':job.platform==='text'?'用户提供的个人文字，不得虚构外部作者。':'',
+    sourceContext:job.mediaSupplement?'用户提供音视频补料；原平台获取完整性未核实，不得声称已抓取平台全文；只归档所给媒体及其转写。':job.supplementFile?'正文由用户补充，原平台获取未核实；补料与原链接属于同一来源，不得声称网络抓取成功。':job.platform==='text'?'用户提供的个人文字，不得虚构外部作者。':'',
     onStage:async(stage)=>{job.stage=stage;await persist(job);}});
    await verifyPublication(job.result,{vault:config.vault,api});
    await verifyWiki(job,api);
@@ -177,6 +180,12 @@ export async function openIngestion(config,ports={}){
  async function supplement(id,{file}){const owner=await status(id);return lock('source-'+hash(owner.url),async()=>{
   const job=await status(id);if(job.status==='complete')throw Error('Completed source requires an explicit refresh, not replacement');
   if(!isAbsolute(file??'')||!(await lstat(file)).isFile())throw Error('Regular absolute supplement file required');
+  if(mediaExtension(file)){
+   const media=await freezeMedia(file,join(root,'media-inputs'));job.supplements??=[];
+   if(job.supplements.some(s=>s.sha256===media.sha256))return job;
+   job.supplements.push({kind:'user-provided-media',sha256:media.sha256,file:media.file,receivedAt:new Date().toISOString()});
+   job.mediaFile=media;job.mediaSupplement=true;delete job.supplementFile;job.generation=(job.generation??0)+1;job.rounds=0;job.status='queued';delete job.bundle;delete job.result;await persist(job);return job;
+  }
   const bytes=await readFile(file);if(bytes.length>20*1024*1024)throw Error('Supplement too large for text input');
   const digest=hash(bytes),saved=join(root,'work',id,'supplements',digest+'-'+file.split('/').at(-1));await exclusive(saved,bytes);
   let readingFile=saved;
@@ -201,7 +210,7 @@ export async function openIngestion(config,ports={}){
   return run(id);
  }
  async function list(){await privateDirectory(join(root,'jobs'));return Promise.all((await readdir(join(root,'jobs'))).filter(n=>/^[a-f0-9]{64}\.json$/u.test(n)).map(n=>status(n.slice(0,-5))));}
- async function submitMany(options){const urls=options.text===undefined?inputURLs(options.input??''):[];if(urls.length<=1)return [await submit(options)];const jobs=[];for(const url of urls)jobs.push(await submit({...options,input:url,requestId:options.requestId?options.requestId+':'+url:undefined}));return jobs;}
+ async function submitMany(options){const urls=options.file===undefined&&options.text===undefined?inputURLs(options.input??''):[];if(urls.length<=1)return [await submit(options)];const jobs=[];for(const url of urls)jobs.push(await submit({...options,input:url,requestId:options.requestId?options.requestId+':'+url:undefined}));return jobs;}
  async function doctor(){
   const checks={host:hostname(),node:process.versions.node,python:Boolean(config.python),vaultConfigured:isAbsolute(config.vault??'')};
   try{const api=ports.api??await localNashsuAPI(config.vault,{maxAttempts:1});await api.assertPublisherReady?.();await api.read('wiki/index.md');checks.wiki='ready';}catch{checks.wiki='unavailable';}

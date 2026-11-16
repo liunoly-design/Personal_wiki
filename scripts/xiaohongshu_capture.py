@@ -6,6 +6,10 @@ import argparse
 import json
 import re
 from pathlib import Path
+try:
+    from .platform_media import download_media,candidates_xhs,acquire_video
+except ImportError:
+    from platform_media import download_media,candidates_xhs,acquire_video
 from urllib.parse import urlsplit
 from urllib.parse import parse_qs
 from bs4 import BeautifulSoup
@@ -119,7 +123,10 @@ def capture(url, output, desktop=False):
         if asset['status']!='downloaded':parts.append(f'图片 {index}：待补（未获得完整图片）')
         if image.get('livePhoto') or image.get('stream'):
             assets.append({'kind':'video','index':index,'status':'waiting_metadata','error':'Live photo transcription required'})
-    if note['type']=='video':assets.append({'kind':'video','status':'waiting_metadata','error':'Video transcription required; Mini generic media interface not configured'})
+    if note['type']=='video':
+        asset={'kind':'video','index':1,'source_id':target,'source_url':canonical,'asset_id':target+'-video','path':'videos/note.mp4'}
+        acquire_video(asset,directory,candidates_xhs(note.get('video') or {}),'xiaohongshu',fetcher=download_media)
+        assets.append(asset);parts.append('[视频转写待处理](wiki-media:'+asset['asset_id']+')')
     if not note['desc'].strip() and not assets:raise ValueError('Xiaohongshu note body empty; retained for review')
     metadata={'url':canonical,'noteId':target,'type':note['type'],'title':title,'author':user,'time':note.get('time'),'lastUpdateTime':note.get('lastUpdateTime'),'assets':assets,'imageSource':'server-provided default image; not a lossless-original guarantee'}
     (directory/'metadata.json').write_text(json.dumps(metadata,ensure_ascii=False,indent=2))

@@ -13,9 +13,11 @@
 | [#47](https://github.com/liunoly-design/Personal_wiki/issues/47) | 三来源真实样本、回归、重启恢复与审查报告 | #42、#43、#44、#45、#46 |
 | [#48](https://github.com/liunoly-design/Personal_wiki/issues/48) | 第二批：普通网页正式接入与独立验收 | #41、#45、#47 |
 | [#49](https://github.com/liunoly-design/Personal_wiki/issues/49) | 第二批：小红书单笔记图文/视频接入 | #41、#45、#47 |
-| [#50](https://github.com/liunoly-design/Personal_wiki/issues/50) | 后续：Mini 通用文件/X 视频持久转写接口 | #44、#47 |
+| [#50](https://github.com/liunoly-design/Personal_wiki/issues/50) | Mini 通用文件、小红书/X 视频持久转写接口 | #44、#47 |
 
-本表记录依赖和范围；状态以各 Issue 与最终验收报告为准。SPEC #40 保持父规格，不在本轮关闭。第二批普通网页与小红书图文已独立真实验收并关闭 #48/#49；视频与实况缺少通用媒体入口时准确待补，#50 保持后续。
+本表记录依赖和范围；状态以各 Issue 与最终验收报告为准。SPEC #40 保持父规格，不在本轮关闭。第二批普通网页与小红书图文已独立真实验收并关闭 #48/#49；本轮 #50 接入通用媒体，小红书实况仍待补。
+
+通用媒体规格及执行顺序见 [Mini 通用媒体](../specs/mini-generic-media.md)，任务状态与验收以 #50 和其报告为准。
 
 首批实现及验证见 [三来源交付报告](../reviews/three-source-ingestion-acceptance-2026-11-16.md)。
 

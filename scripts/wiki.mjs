@@ -9,8 +9,8 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {openIngestion} from '../src/ingestion.js';
 
 const help=`Personal Wiki — durable AI ingestion
-  wiki submit [share text or URL] [--text TEXT] [--mode record|convert]
-  wiki convert [share text or URL] [--text TEXT]
+  wiki submit [share text or URL] [--text TEXT | --file FILE] [--mode record|convert]
+  wiki convert [share text or URL] [--text TEXT | --file FILE]
   wiki run TASK_ID | status TASK_ID | pending
   wiki ingest TASK_ID | retry TASK_ID | supplement TASK_ID --file FILE
   wiki worker [--watch] | doctor
@@ -27,7 +27,7 @@ try{
  const service=await openIngestion(config);const [command,id]=positionals;
  let result;
  if(command==='submit'||command==='convert'){
-  const jobs=await service.submitMany({...(values.text!==undefined?{text:values.text}:{input:positionals.slice(1).join(' ')}),mode:command==='convert'?'convert':values.mode??'record',name:values.name,requestId:values['request-id'],background:values.background,refresh:values.refresh});
+  const jobs=await service.submitMany({...(values.file!==undefined?{file:resolve(values.file),...(values.text!==undefined?{text:values.text}:{}),...(positionals.length>1?{input:positionals.slice(1).join(' ')}:{})}:values.text!==undefined?{text:values.text}:{input:positionals.slice(1).join(' ')}),mode:command==='convert'?'convert':values.mode??'record',name:values.name,requestId:values['request-id'],background:values.background,refresh:values.refresh});
   const results=[];
   for(const job of jobs){results.push(command==='convert'?await service.run(job.id):job);
    if(command==='submit'&&config.autoStart!==false&&job.status==='queued'){

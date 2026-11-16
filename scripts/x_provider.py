@@ -11,6 +11,9 @@ import re
 import ipaddress
 from urllib.request import Request, urlopen
 from pathlib import Path
+try:
+    from .platform_media import download_media,acquire_video
+except ImportError:from platform_media import download_media,acquire_video
 from urllib.parse import urlsplit
 try:
     from .blog_capture import fetch_public as pinned_fetch, public_addresses
@@ -183,11 +186,20 @@ def capture(url, output):
         evidence.append(dict(id=str(post['id']), url=canonical, author_id=post.get('author',{}).get('id'), replying_to=post.get('replying_to'), quoted=quoted))
         article = post.get('article')
         body = article_body(article) if article else (post.get('raw_text') or {}).get('text', post.get('text'))
-        if not isinstance(body,str) or not body.strip():raise ValueError('X full text missing')
+        if not isinstance(body,str) or not body.strip() and not (post.get('media') or {}).get('videos'):raise ValueError('X full text missing')
         result = [body, '\n来源：'+canonical]
         for photo in (post.get('media') or {}).get('photos', []):result.append(image(photo['url']))
-        if (post.get('media') or {}).get('videos'):
-            raise ValueError('X video requires full transcription; provider JSON retained')
+        for index,video in enumerate((post.get('media') or {}).get('videos',[])):
+            asset_id=str(post['id'])+'-video-'+str(index+1)
+            asset={'kind':'video','source_id':str(post['id']),'source_url':canonical,'asset_id':asset_id,'path':'videos/'+asset_id+'.mp4'}
+            formats=[f for f in video.get('formats',[]) if f.get('container')=='mp4' and f.get('url') and min(f.get('width',0),f.get('height',0))<=1080]
+            formats.sort(key=lambda f:(f.get('width',0)*f.get('height',0),f.get('bitrate',0)),reverse=True)
+            options=[{'url':f['url'],'duration_seconds':video.get('duration')} for f in formats]
+            if not options and video.get('format')=='video/mp4' and video.get('url'):options=[{'url':video['url'],'duration_seconds':video.get('duration')}]
+            acquire_video(asset,directory,options,'x',fetcher=download_media)
+            assets.append(asset)
+            if asset['status']!='downloaded':missing.append(asset)
+            result.append('[视频转写待处理](wiki-media:'+asset_id+')')
         if post.get('quote') is not None:result.extend(['## 引用帖', post_body(post['quote'], True)])
         return '\n\n'.join(result)
 

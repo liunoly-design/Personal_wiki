@@ -3,10 +3,12 @@ import {join,resolve,dirname} from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
+import {preparePlatformMedia} from './platform-media.js';
+import {captureLocalMedia} from './remote-file-media.js';
 import {collectRemoteDouyin} from './remote-douyin.js';
 const exec=promisify(execFile);
 const hash=value=>createHash('sha256').update(value).digest('hex');
-export const supportedSource=platform=>['x','wechat','douyin','text','web','xiaohongshu'].includes(platform);
+export const supportedSource=platform=>['x','wechat','douyin','text','web','xiaohongshu','file'].includes(platform);
 export const inputURLs=input=>[...new Set((input.match(/https?:\/\/[^\s<>\[\]()，。；]+/gu)??[]).map(s=>s.replace(/\\&/gu,'&').replace(/[)）】」』！!？?]+$/u,'')))];
 
 export function identifyInput({input,text}){
@@ -32,14 +34,15 @@ export function identifyInput({input,text}){
 }
 
 export async function captureArticle({job,config,directory,signal}){
+ if(job.mediaFile)return captureLocalMedia({job,config,directory,signal});
  if(job.platform==='douyin')return collectRemoteDouyin({...config,url:job.url,convertOnly:true,resumeRemote:job.rounds>1||job.recoveries?.length>0,explicitRemoteRecovery:job.recoveries?.length>0,stateDir:config.stateDir,python:config.python,signal,onStage:config.onStage});
  const fx=job.platform==='x'&&(job.rounds===1||job.lastCapture?.provider==='FxEmbed v2 thread'&&job.lastCapture?.contextStatus==='complete');
  const script=fx?'x_provider.py':job.platform==='xiaohongshu'?'xiaohongshu_capture.py':'capture_article.py';
  if(fx)directory=join(dirname(directory),String(job.generation??0)+'-fx');
  await config.onStage?.('fetching',{directory:join(directory,'package')});
  const {stdout}=await exec(config.python,[resolve(import.meta.dirname,'../scripts/'+script),'--url',job.fetchUrl??job.url,'--output',directory,...(job.platform==='web'&&job.rounds>1?['--render']:[]),...(job.platform==='xiaohongshu'&&job.rounds>1?['--desktop']:[]),...(job.rounds>1&&config.browserProfile&&['x','wechat'].includes(job.platform)?['--browser-profile',config.browserProfile]:[])],{signal,env:{...process.env,WIKI_QUEUE_MANAGED:'1'},timeout:900000,maxBuffer:2*1024*1024});
- const capture=JSON.parse(stdout);const manifest=await readFile(join(capture.directory,'manifest.json'),'utf8').then(JSON.parse).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
- if(manifest?.assets?.some(a=>a.kind==='video'))return {...capture,status:'partial',failure:'Video transcription required; acquired materials retained for Mini generic media integration'};
+ let capture=JSON.parse(stdout);const manifest=await readFile(join(capture.directory,'manifest.json'),'utf8').then(JSON.parse).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
+ if(manifest?.assets?.some(a=>a.kind==='video')){job.lastCapture=capture;await config.onStage?.('media_preparing',{directory:capture.directory});capture=await preparePlatformMedia({capture,manifest,job,config,directory,signal});}
  if(job.platform==='xiaohongshu'&&manifest?.assets?.some(a=>a.kind==='image')&&(config.ocr===false||process.platform!=='darwin'))return {...capture,status:'partial',failure:'Xiaohongshu image OCR not configured; acquired materials retained'};
  if(capture.status==='complete'&&capture.contextStatus!=='partial'&&config.ocr!==false&&process.platform==='darwin'){
   const result=await exec(config.python,[resolve(import.meta.dirname,'../scripts/image_ocr.py'),'--package',capture.directory,'--output',join(directory,'ocr-package')],{signal,timeout:900000,maxBuffer:2*1024*1024});
