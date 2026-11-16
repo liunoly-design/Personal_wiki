@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,symlink} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createAdapters} from '../src/nashsu.js';
@@ -72,6 +73,20 @@ test('rejected reading structure is explained on retry while original bytes rema
   });
   const first=await adapters.importAndCompile({capture:{directory:snapshot},slug:'checklist',url:'https://example.org/checklist'});assert.equal(first.reading.status,'pending');
   const recovered=await adapters.retryReading(first.sourceId);assert.equal(recovered.status,'complete');assert.match(await readFile(recovered.path,'utf8'),/- 保留每一项/);assert.equal(await readFile(join(first.archive,'article.md'),'utf8'),original);assert.equal(calls,2);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('reading rejection state cannot follow a directory symlink into an original attachment',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-symlink-'));
+ try{
+  const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);
+  const original='# Checklist\n\n- Keep every item.',attachment='{"original":"ATTACHMENT"}';
+  const key=createHash('sha256').update('gpt-5.6-terra:v1:'+original).digest('hex');
+  await writeFile(join(snapshot,'article.md'),original);await writeFile(join(snapshot,key+'.json'),attachment);
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async()=> '# 核对清单\n\n保留每一项。',generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/checklist.md---\n# 清单\n摘要。\n---END FILE---'});
+  const first=await adapters.importAndCompile({capture:{directory:snapshot},slug:'checklist',url:'https://example.org/checklist'});assert.equal(first.reading.status,'pending');
+  const rejected=join(vault,'.personal-wiki/readings',first.sourceId,'rejected');await rm(rejected,{recursive:true,force:true});await symlink(first.archive,rejected,'dir');
+  await assert.rejects(adapters.retryReading(first.sourceId));assert.equal(await readFile(join(first.archive,key+'.json'),'utf8'),attachment);assert.equal(await readFile(join(first.archive,'article.md'),'utf8'),original);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

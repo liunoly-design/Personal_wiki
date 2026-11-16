@@ -3,7 +3,6 @@ import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {store} from './protected-compiler.js';
 import {createCodex} from './codex.js';
-import {saveJSON,optionalJSON} from './durable-files.js';
 
 function units(markdown){
  const result=[];
@@ -77,11 +76,12 @@ export async function buildChineseReading({vault,record,translate,python,signal,
   const {masked,preserved}=protect(unit.text);
   const key=createHash('sha256').update('gpt-5.6-terra:v1:'+unit.text).digest('hex');
   try{content.push(await readFile(join(cache,'units',key+'.md'),'utf8'));continue;}catch(e){if(e.code!=='ENOENT')throw e;}
-  const rejected=join(cache,'rejected',key+'.json');
-  const translated=await translate({text:masked,feedback:await optionalJSON(rejected),signal});
+  const rejection={operation:'reading-rejection',vault,sourceId:record.id,key};
+  const {feedback}=await store(rejection,{python,signal});
+  const translated=await translate({text:masked,feedback,signal});
   let restored;
   try{restored=restore(unit.text,translated,preserved);}
-  catch(error){await saveJSON(rejected,{reason:error.message,previousOutput:translated});throw error;}
+  catch(error){await store({...rejection,feedback:{reason:error.message,previousOutput:translated}},{python,signal});throw error;}
   await store({operation:'reading-unit',vault,sourceId:record.id,key,content:restored},{python,signal});
   content.push(restored);
  }

@@ -406,15 +406,26 @@ if __name__ == '__main__':
             result = refresh_terms(root, request)
         elif operation == 'archive':
             result = archive(root, request)
-        elif operation in ('verify', 'reading-unit'):
+        elif operation in ('verify', 'reading-unit', 'reading-rejection'):
             record = json.loads(root.read(f".personal-wiki/{request['sourceId']}.json"))
             if operation == 'verify':
                 verify(root, record)
-            if operation == 'reading-unit':
+            if operation in ('reading-unit','reading-rejection'):
                 if not re.fullmatch('[a-f0-9]{64}', request['key']):
                     raise ValueError('Invalid reading unit')
+            if operation == 'reading-unit':
                 root.immutable(f".personal-wiki/readings/{record['id']}/units/{request['key']}.md", request['content'].encode())
             result = {'verified': True}
+            if operation == 'reading-rejection':
+                path=f".personal-wiki/readings/{record['id']}/rejected/{request['key']}.json"
+                if 'feedback' in request:
+                    feedback=request['feedback']
+                    if not isinstance(feedback,dict) or not all(isinstance(feedback.get(k),str) for k in ('reason','previousOutput')):
+                        raise ValueError('Invalid reading rejection feedback')
+                    root.put(path,encode(feedback),replace=True)
+                else:
+                    saved=root.optional(path)
+                    result={'feedback':json.loads(saved) if saved else None}
         elif operation == 'reading':
             result = publish_reading(root, request)
         elif operation == 'commit':
