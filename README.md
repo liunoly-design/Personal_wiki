@@ -1,5 +1,7 @@
 # 个人 Wiki / Personal Wiki
 
+2026-11-16：[三层摄取规格](docs/specs/three-layer-ingestion.md)正在实施，首批统一 AI CLI / skill 与 X、公众号、Mini 抖音，支持只转换、待补补料及自动维护。[CLI 契约](docs/contracts/ingestion-cli.md)、[开发任务 #41–#47](docs/plans/three-source-ingestion-tickets.md)。本机 Wiki 继续作为当前写入端；Mini Wiki 接管不在此默认执行。上线与真实验收见交付报告，下面记录按其日期理解。
+
 2026-11-01 新部署方向：dots 连接 Mac mini，Mini 同机运行 LLM Wiki、主库和受保护处理程序。请先读 [给 dots 的接管说明](docs/handoffs/dots-mac-mini-wiki.md) 与 [更新后的架构](架构与数据.md)。当前已迁入数据和代码，尚未完成 LLM Wiki 注册、内容 skill 和生产切换；下方旧版本安装说明保留为历史。
 
 2026-10-04：0.7.0 抖音实现候选已本地开发，[使用与恢复](docs/douyin-v070.md)、[验收报告](docs/research/v0.7.0-acceptance-2026-10-04.md)。指定抖音公开下载受限；真实该来源发布/查询/飞书回执未完成，未部署生产。60秒分段云ASR已做非私人合成语音长音频试验；不能替代自然语音人工参考验收。
