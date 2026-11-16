@@ -1,6 +1,6 @@
 # 独立安装和 dots 调用
 
-面向 macOS Apple Silicon。Node 24+，Python 3.11+（摄取本身最低3.9），本机 Codex CLI。四个包分别安装，不需要开发 checkout。每个包有 `distribution.json` 记录来源提交和文件哈希；GitHub Release 提供 SHA256SUMS。先下载并 `shasum -a 256 -c SHA256SUMS`，再解压需要的包。下列 `/absolute/...` 均替换为本机真实路径。
+面向 macOS Apple Silicon。Node 24+，Python 3.11+（摄取本身最低3.9），本机 Codex CLI。四个包分别安装，不需要开发 checkout。每个包有 `distribution.json` 记录来源提交和文件哈希；GitHub Release 提供 SHA256SUMS。下载完整发行文件后执行 `shasum -a 256 -c SHA256SUMS`；仅下载一个包时下载它同名的 `.sha256` 并对该文件执行 `shasum -a 256 -c 文件名.sha256`，再解压。下列 `/absolute/...` 均替换为本机真实路径。
 
 ## CLI
 

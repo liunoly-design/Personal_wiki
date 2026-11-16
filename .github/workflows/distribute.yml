@@ -27,9 +27,10 @@ jobs:
           for COMPONENT in cli wiki-bridge mini-media llm-wiki-setup; do
             python distribution/build.py --component "$COMPONENT" --version "$VERSION" --output dist
           done
-          cat dist/*.sha256 > dist/SHA256SUMS
           cp config/examples/*.json dist/
-          cp docs/independent-install.md docs/llm-wiki-install.md docs/reviews/independent-distribution-2026-11-16.md dist/
+          cp docs/independent-install.md docs/llm-wiki-install.md docs/reviews/independent-distribution-2026-11-16.md docs/reviews/independent-distribution-code-review-2026-11-16.md dist/
+          cd dist
+          sha256sum *.tar.gz *.json *.md > SHA256SUMS
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}

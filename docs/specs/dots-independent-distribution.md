@@ -59,4 +59,4 @@ personal-wiki submit --text 'Dots 接入验收：这是一条合成测试资料�
 
 - 既有公开样本和 Mini 服务：见 `generic-media-acceptance-2026-11-16.md`；属于前置基础能力。
 - dots 真实发起：用户 dots 回执与本机同任务复核均通过（文字及公开视频复用）。
-- 独立安装包、GitHub Release、LLM Wiki 新环境安装：尚未实施/验收。
+- CLI/桥接/Mini 独立安装、实际合成来源入库、官方 LLM Wiki 隔离校验安装均已验证；详见 [独立发行报告](../reviews/independent-distribution-2026-11-16.md)。GitHub Release 和最终下载读回正在执行。
