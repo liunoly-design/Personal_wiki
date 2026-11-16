@@ -33,10 +33,11 @@ class PinnedHTTPS(http.client.HTTPSConnection):
         self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
 
 
-def fetch_public(url, limit, dest):
+def fetch_public(url, limit, dest, resolve_addresses=None):
+    resolve_addresses = resolve_addresses or public_addresses
     current = url
     for _ in range(6):
-        u, addresses = public_addresses(current)
+        u, addresses = resolve_addresses(current)
         attempts=1 if os.environ.get('WIKI_QUEUE_MANAGED')=='1' else 5
         for attempt in range(attempts):
             connection = PinnedHTTPS(u.hostname, addresses[attempt % len(addresses)])

@@ -25,6 +25,15 @@ test('submit uses authenticated versioned HTTP and stable retry identity',async 
  await client.submit('https://v.douyin.com/example/');assert.equal(keys[0],keys[1]);assert.equal(keys[0].length,64);
 });
 
+test('explicit recovery resumes the original stopped job without submitting a new one',async t=>{
+ const origin=await serve(t,(req,res)=>{
+  assert.equal(req.method,'POST');assert.equal(req.url,'/v1/jobs/job_1/resume');
+  res.setHeader('Content-Type','application/json');res.end(JSON.stringify({api_version:'1',job_id:'job_1',status:'queued',reused:true}));
+ });
+ const client=new MediaServiceClient({baseUrl:origin,token:'fixture-token'});
+ assert.equal((await client.resume('job_1')).job_id,'job_1');
+});
+
 test('complete HTTP workflow returns verified Markdown, remote media and seek probe',async t=>{
  const {createHash}=await import('node:crypto');const markdown='# 合成视频\n\n[00:00] 完整中文机器稿。\n';
  const digest=createHash('sha256').update(markdown).digest('hex');let origin;

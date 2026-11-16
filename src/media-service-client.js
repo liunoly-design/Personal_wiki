@@ -51,6 +51,11 @@ export class MediaServiceClient {
   const data=await this.json('/v1/jobs',{method:'POST',body,headers:{'Idempotency-Key':key}});
   id(data.job_id);return {...data,idempotency_key:key};
  }
+ async resume(jobId,{reverify=false}={}){
+  const data=await this.json(`/v1/jobs/${id(jobId)}/resume${reverify?'?reverify=true':''}`,{method:'POST'});
+  if(data.job_id!==jobId||data.status!=='queued'||data.reused!==true)throw Error('Media service recovery not confirmed');
+  return data;
+ }
  async status(jobId){const data=await this.json(`/v1/jobs/${id(jobId)}`);if(data.job_id!==jobId||!['queued','downloading','extracting','transcribing','succeeded','failed','partial_failed','waiting_login','waiting_confirmation'].includes(data.status))throw Error('Media service invalid task state');const detail=failureDetails(data);return {api_version:'1',job_id:jobId,status:data.status,stage:detail.stage,...(data.error?{error:{code:detail.code,retryable:detail.retryable}}:{}),...Object.fromEntries(['created_at','updated_at'].filter(key=>typeof data[key]==='string'&&/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?$/u.test(data[key])&&Number.isFinite(Date.parse(data[key]))).map(key=>[key,data[key]]))};}
  async result(jobId,{expectedSourceUrl}={}) {
   if((await this.status(jobId)).status!=='succeeded')throw Error('Media service result not ready');

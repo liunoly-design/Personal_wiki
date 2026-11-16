@@ -36,7 +36,7 @@ export async function collectRemoteDouyin(options,collect) {
  if(!tokenStat.isFile()||(tokenStat.mode&0o077)||tokenStat.uid!==process.getuid())throw Error('Remote media credential file must be owned and private');
  const token=(await readFile(options.mediaServiceTokenFile,'utf8')).trim();
  const client=new MediaServiceClient({baseUrl:options.mediaServiceUrl,token,signal});
- const api=options.api??await localNashsuAPI(vault,{signal,maxAttempts:1});await api.assertPublisherReady?.();
+ const api=options.convertOnly?null:options.api??await localNashsuAPI(vault,{signal,maxAttempts:1});await api?.assertPublisherReady?.();
  const base=join(options.stateDir,'remote-video');await privateDirectory(base);
  const alias=join(base,'jobs',hash(url));await privateDirectory(alias);
  let release=await acquireQueueLease(alias,python);
@@ -48,6 +48,7 @@ export async function collectRemoteDouyin(options,collect) {
   if(!remote.jobId){await onStage('remote_submitting');const response=await client.submit(url,{idempotencyKey:remote.idempotencyKey});remote.jobId=response.job_id;await saveJSON(path,remote);}
  }finally{await release();}
  const report={mode:'remote',remoteJobId:remote.jobId,video:'remote',audio:'remote',transcriptStatus:'pending',knowledgeStatus:'pending'};
+ if(options.resumeRemote){const stopped=await client.status(remote.jobId);if(['failed','partial_failed'].includes(stopped.status)&&stopped.error?.retryable===true)await client.resume(remote.jobId);}
  await onStage('remote_waiting',{video:report});
  let result;
  try{result=await client.wait(remote.jobId,{timeoutMs:1800000,expectedSourceUrl:url});}
@@ -70,6 +71,7 @@ export async function collectRemoteDouyin(options,collect) {
   const title=(manifest.source.title??'抖音视频').replace(/[\r\n]/gu,' ');
   const article=`# ${title}\n\n> 完整中文逐句${manifest.translation?'机器译文':'机器转写'}；未经人工校订。保留时间戳，不以摘要替代全文。\n\n来源：${manifest.source.url}\n\n## 完整中文正文\n\n${chinese}\n\n## 媒体与来源核对\n\n${['video','audio','cover'].map(kind=>`[${{video:'视频',audio:'完整音频',cover:'封面'}[kind]}](${client.base.origin}${manifest.media[kind].path})`).join(' · ')}\n\n[完整原始转写与来源资料](transcript.md)（独立归档，仅供核对）\n`;
   await saveMediaResult(join(snapshot,'article.md'),{markdown:article,manifest});
+  if(options.convertOnly)return {directory:snapshot,text:article,status:'complete',url:manifest.source.url,remoteJobId:remote.jobId,preparedReadingModel:manifest.translation?.model??`whisper.cpp ${manifest.transcription.model}`};
   await onStage('remote_knowledge',{video:{...report,transcriptStatus:'complete',sourceLanguage:manifest.transcription.language}});
   const publishedPath=join(directory,'published.json');const saved=await optionalJSON(publishedPath);
   const compiled=await collect({...options,url:manifest.source.url,isVideoPrepared:true,workspace:saved?options.workspace:join(directory,'knowledge'),api,previousResult:saved,refresh:false,preparedReadingModel:manifest.translation?.model??`whisper.cpp ${manifest.transcription.model}`,capture:async()=>({directory:snapshot,text:article,status:'complete'}),sourceContext:'单一视频来源；主正文是完整中文逐句译文或中文转写，保留时间戳，不把英文原稿或摘要作为正文。英文原稿只在独立来源附件中供核对，机器内容未经人工核实。原视频和完整音频保存在Mac mini，manifest包含其哈希；不得声称本机保存了完整媒体。'});

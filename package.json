@@ -3,6 +3,9 @@
   "version": "0.7.8",
   "private": true,
   "type": "module",
+  "bin": {
+    "personal-wiki": "scripts/wiki.mjs"
+  },
   "engines": {
     "node": ">=24"
   },

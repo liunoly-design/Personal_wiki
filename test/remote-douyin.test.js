@@ -29,6 +29,8 @@ test('remote video publishes Chinese sentences, keeps original separately, resum
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify(req.url.endsWith('/manifest')?manifest:{api_version:'1',job_id:'remote_1',status:'succeeded'}));
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
  const options={url:'https://v.douyin.com/Example/',mediaServiceUrl:`http://127.0.0.1:${server.address().port}`,mediaServiceTokenFile:token,vault,stateDir:join(root,'state'),workspace:join(root,'work'),python:'/usr/bin/python3',pipeline:async()=>{throw Error('Local backend must not run');},translate:async()=>{throw Error('Already translated remote text must not be translated again');},flash:{extract:async()=>({slug:'remote-video-example',terms:[]}),explain:async()=>[]},generate:async({stage})=>{modelCalls++;return stage==='analysis'?'分析':'---FILE: wiki/sources/remote-video-example.md---\n# 资料卡\n来源摘要。\n---END FILE---';},api:{read:path=>readFile(join(vault,path),'utf8'),search:async()=>({results:searchOffline?[]:[{path:'wiki/sources/remote-video-example.md'}]})}};
+ const converted=await collectCanonical({...options,convertOnly:true,api:{assertPublisherReady:async()=>{throw Error('Convert must not use Wiki');}}});
+ assert.equal(converted.status,'complete');assert.match(converted.text,/完整末尾凤凰校验/);assert.equal(modelCalls,0);
  await assert.rejects(collectCanonical(options),/search verification failed/);const afterFailure=modelCalls;searchOffline=false;
  const result=await collectCanonical(options);assert.equal(modelCalls,afterFailure);assert.equal(submissions,1);
  assert.equal(result.status,'complete');assert.equal(result.video.mode,'remote');assert.equal(result.video.remoteJobId,'remote_1');
