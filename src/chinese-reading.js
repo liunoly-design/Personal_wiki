@@ -14,7 +14,7 @@ function needsTranslation(text){
  return latin>0&&han<=latin;
 }
 
-function units(markdown){
+function units(markdown,groupParagraphs=true){
  const result=[];
  const paragraph=text=>{
   for(const block of text.split(/(\n[ \t]*\n)/u)){
@@ -40,7 +40,7 @@ function units(markdown){
   const unit={...result[i]};
   if(unit.text!==undefined){
    if(!needsTranslation(unit.text)){grouped.push({literal:unit.text});continue;}
-   while(result[i+1]?.literal!==undefined&&!result[i+1].literal.trim()&&result[i+2]?.text!==undefined&&needsTranslation(result[i+2].text)&&unit.text.length+result[i+1].literal.length+result[i+2].text.length<=4000){unit.text+=result[i+1].literal+result[i+2].text;i+=2;}
+   while(groupParagraphs&&result[i+1]?.literal!==undefined&&!result[i+1].literal.trim()&&result[i+2]?.text!==undefined&&needsTranslation(result[i+2].text)&&unit.text.length+result[i+1].literal.length+result[i+2].text.length<=4000){unit.text+=result[i+1].literal+result[i+2].text;i+=2;}
   }
   grouped.push(unit);
  }
@@ -55,7 +55,8 @@ function protect(text){
 function restore(source,translated,preserved){
  if(typeof translated!=='string'||!translated.trim())throw Error('Incomplete Chinese reading');
  const sourceBlocks=source.trim().split(/\n[ \t]*\n/u).length;
- if(translated.trim().split(/\n[ \t]*\n/u).length!==sourceBlocks)throw Error('Chinese reading omitted or rearranged paragraphs');
+ const translatedBlocks=translated.trim().split(/\n[ \t]*\n/u).length;
+ if(translatedBlocks!==sourceBlocks)throw Error('Chinese reading omitted or rearranged paragraphs; expected '+sourceBlocks+', received '+translatedBlocks);
  const sourceProse=preserved.reduce((text,p)=>text.replace(p.value,''),source);
  const translatedProse=preserved.reduce((text,p)=>text.replace(p.token,''),translated);
  if(sourceProse.length>160&&translatedProse.length<sourceProse.length*0.15)throw Error('Chinese reading appears truncated; requires review');
@@ -81,7 +82,7 @@ export async function buildChineseReading({vault,record,translate,python,signal,
  // Extraction metadata stays in the immutable original, not in translated prose.
  const body=original.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u,'');
  if(preparedModel)return store({operation:'reading',vault,sourceId:record.id,content:body,model:preparedModel},{python,signal});
- for(const unit of units(body)){
+ for(const unit of units(body,typeof translate.batch!=='function')){
   signal?.throwIfAborted();
   if(unit.literal!==undefined){content.push(unit.literal);continue;}
   if(!needsTranslation(unit.text)){content.push(unit.text);continue;}
