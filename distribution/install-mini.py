@@ -1,5 +1,5 @@
 """Independent source installer; models, credentials and state stay outside releases."""
-import argparse,hashlib,json,os,shutil,subprocess,sys,tempfile,uuid,plistlib
+import argparse,hashlib,json,os,shutil,subprocess,sys,tempfile,uuid,plistlib,re
 from pathlib import Path
 
 def safe(path):
@@ -16,15 +16,19 @@ def digest(path):
 
 def install(a):
  package=Path(__file__).resolve().parent;manifest=json.loads((package/'distribution.json').read_text())
+ if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?',manifest.get('version','')):raise ValueError('Invalid release version')
  if manifest['component']!='mini-media':raise ValueError('Mini distribution required')
  for path,sha in manifest['files'].items():
   if Path(path).is_absolute() or any(s in ('','.','..') for s in path.split('/')):raise ValueError('Unsafe distribution path')
   source=safe(package/path)
   if not source.is_file() or digest(source)!=sha:raise ValueError('Distribution integrity mismatch')
  prefix=safe(a.prefix);prefix.mkdir(parents=True,exist_ok=True,mode=0o700)
- identity=prefix/'.installation.json';owner={'component':'mini-media','prefix':str(prefix)}
+ safe(prefix/'bin/personal-wiki-media')
+ identity=safe(prefix/'.installation.json');owner={'component':'mini-media','prefix':str(prefix)}
  if identity.exists() and json.loads(identity.read_text())!=owner:raise ValueError('Installation identity conflict')
- identity.write_text(json.dumps(owner)+'\n');identity.chmod(0o600)
+ if not identity.exists():
+  with identity.open('x') as out:out.write(json.dumps(owner)+'\n')
+  identity.chmod(0o600)
  version=manifest['version']+'-'+hashlib.sha256(json.dumps(manifest['files'],sort_keys=True).encode()).hexdigest()[:16]
  releases=safe(prefix/'releases');releases.mkdir(exist_ok=True,mode=0o700);release=safe(releases/version)
  if not release.exists():
@@ -45,16 +49,18 @@ def install(a):
  else:subprocess.run([str(python),'-c','import fastapi,uvicorn,httpx,psutil'],check=True)
  data=safe(prefix/'data');data.mkdir(exist_ok=True,mode=0o700);bin_dir=safe(prefix/'bin');bin_dir.mkdir(exist_ok=True,mode=0o700)
  from shlex import quote
- launcher=bin_dir/'personal-wiki-media';body=f'#!/bin/sh\nexec {quote(str(python))} {quote(str(prefix/"current/services/mini-media/gateway.py"))} "$@" --data {quote(str(data))}\n'
+ launcher=safe(bin_dir/'personal-wiki-media');body=f'#!/bin/sh\nexec {quote(str(python))} {quote(str(prefix/"current/services/mini-media/gateway.py"))} "$@" --data {quote(str(data))}\n'
  if launcher.exists() and launcher.read_text()!=body:raise ValueError('Existing launcher differs; retained')
- launcher.write_text(body);launcher.chmod(0o700)
+ if not launcher.exists():
+  with launcher.open('x') as out:out.write(body)
+  launcher.chmod(0o700)
  current=prefix/'current'
  if current.exists() and not current.is_symlink():raise ValueError('Current must be installer symlink')
  temporary=prefix/('.current-'+uuid.uuid4().hex);temporary.symlink_to(release);temporary.replace(current)
  return {'status':'installed','prefix':str(prefix),'command':str(launcher),'data':str(data),'python':str(python),'next':'Run init with verified model, then serve. ASR server and English translator are separate prerequisites; see guide.'}
 
 def lifecycle(a):
- prefix=safe(a.prefix);owner=json.loads((prefix/'.installation.json').read_text())
+ prefix=safe(a.prefix);owner=json.loads(safe(prefix/'.installation.json').read_text())
  if owner!={'component':'mini-media','prefix':str(prefix)}:raise ValueError('Installation identity mismatch')
  launcher=prefix/'bin/personal-wiki-media';plist=safe(Path.home()/'Library/LaunchAgents/com.personal-wiki.distribution.mini-media.plist')
  body={'Label':'com.personal-wiki.distribution.mini-media','ProgramArguments':[str(launcher),'serve'],'KeepAlive':True,'RunAtLoad':True,'StandardOutPath':str(prefix/'data/logs/service.log'),'StandardErrorPath':str(prefix/'data/logs/error.log')}

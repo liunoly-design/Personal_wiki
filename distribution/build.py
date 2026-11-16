@@ -16,6 +16,7 @@ def build(component,version,output,allow_dirty=False):
  dirty=bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip())
  if dirty and not allow_dirty:raise ValueError('Commit source before producing a release')
  output=Path(output).resolve();output.mkdir(parents=True,exist_ok=True)
+ tracked=set(subprocess.check_output(['git','ls-files','-z'],cwd=ROOT).decode().split('\0'))
  name=f'personal-wiki-{component}-{version}'
  with tempfile.TemporaryDirectory() as tmp:
   stage=Path(tmp)/name;stage.mkdir();core=stage/'runtime';core.mkdir()
@@ -24,6 +25,7 @@ def build(component,version,output,allow_dirty=False):
   if component in ('cli','wiki-bridge'):
    files.extend(p for p in (ROOT/'scripts').iterdir() if p.is_file() and (p.suffix in ('.py','.swift') or p.name in ('wiki.mjs','wiki-bridge.mjs','maintain-ingestion.mjs','media-service.mjs')))
   for source in sorted(set(files)):
+   if source.relative_to(ROOT).as_posix() not in tracked:continue
    if source.is_symlink() or any(p.is_symlink() for p in source.parents if p!=ROOT.parent):raise ValueError('Source symlink rejected')
    relative=source.relative_to(ROOT);target=core/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,target)
   if component in ('cli','wiki-bridge'):

@@ -15,7 +15,7 @@ def install(a):
  expected='https://github.com/nashsu/llm_wiki/releases/download/'+tag+'/LLM.Wiki_aarch64.app.tar.gz'
  if url!=expected or len(sha)!=64 or any(c not in '0123456789abcdef' for c in sha):raise ValueError('Invalid upstream pin')
  destination=safe(a.destination);destination.mkdir(parents=True,exist_ok=True)
- target=destination/'LLM Wiki.app'
+ target=safe(destination/'LLM Wiki.app')
  if target.exists():raise ValueError('Existing application retained; choose an empty destination for upgrade review')
  with tempfile.TemporaryDirectory(prefix='.llm-wiki-',dir=destination) as temporary:
   stage=Path(temporary);archive=Path(a.archive) if a.archive else stage/'upstream.tar.gz'

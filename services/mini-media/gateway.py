@@ -47,7 +47,8 @@ def initialize(args):
   directory=safe(args.translation_model_dir)
   if not directory.is_absolute() or not args.translation_python or not args.translation_sha256:raise ValueError('Translation directory, Python and verified model SHA256 required')
   if digest(safe(directory/'model.safetensors'))!=args.translation_sha256:raise ValueError('Translation model SHA256 mismatch')
-  trpython=safe(args.translation_python) if not args.translation_python.is_symlink() else args.translation_python.resolve()
+  trpython=args.translation_python
+  safe(trpython.parent)
   if not trpython.is_absolute() or not trpython.is_file():raise ValueError('Translation Python required')
   hashes={p.name:digest(safe(p)) for p in directory.iterdir() if p.is_file() and p.suffix in ('.json','.safetensors','.jinja','.txt')}
   config['translation']={'enabled':True,'source_language':'en','target_language':'zh','model':'Qwen3-4B-Instruct-2507 4bit MLX','source':'https://huggingface.co/mlx-community/Qwen3-4B-Instruct-2507-4bit','revision':'50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b','sha256':args.translation_sha256,'file_hashes':hashes,'model_directory':str(directory),'python':str(trpython),'script':str(ROOT/'shared/translate_segments_mlx.py'),'quality_revision':3}
