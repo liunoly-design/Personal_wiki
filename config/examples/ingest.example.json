@@ -1,0 +1,11 @@
+{
+  "stateDir": "/ABSOLUTE/PATH/personal-wiki-state",
+  "runtimeRoot": "/ABSOLUTE/PATH/personal-wiki-state/runtime",
+  "vault": "/ABSOLUTE/PATH/Personal-Wiki-Vault",
+  "python": "/ABSOLUTE/PATH/python",
+  "codexBinary": "/ABSOLUTE/PATH/codex",
+  "compilerModel": "gpt-6-sol",
+  "mediaServiceUrl": "http://192.0.2.10:8765",
+  "mediaServiceTokenFile": "/ABSOLUTE/PATH/private/media-token",
+  "autoStart": false
+}

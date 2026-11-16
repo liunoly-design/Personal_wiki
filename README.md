@@ -1,5 +1,7 @@
 # 个人 Wiki / Personal Wiki
 
+2026-11-16 新任务：用户确认先验收 dots 实际调用，再独立发行 CLI、Mini 完整服务、Wiki 接入及 LLM Wiki 安装配置。当前 dots 触发回执待用户发起，独立安装包尚未发布；见 [规格与验收指令](docs/specs/dots-independent-distribution.md)、[配置样例](config/examples/README.md) 和 [任务 #51](https://github.com/liunoly-design/Personal_wiki/issues/51)。
+
 2026-11-16 通用媒体接口：本地音视频、小红书视频、X 视频复用 Mini 单路转录队列，带来源/哈希/时长证据和完整时间戳 Markdown。实现与真实验收见 [通用媒体报告](docs/reviews/generic-media-acceptance-2026-11-16.md)，调用见 [CLI 契约](docs/contracts/ingestion-cli.md)。
 2026-11-16 第二批已完成：普通网页、小红书图文均通过全文获取、Markdown/本机 OCR、LLM Wiki 入库与读回检索的真实验收，CLI、skill 和 worker 已启用。两轮失败后的真实维护、版本启用及补跑已实测；原件、幂等与人工内容保护继续生效。[第二批交付报告](docs/reviews/web-xiaohongshu-ingestion-acceptance-2026-11-16.md)、[CLI 契约](docs/contracts/ingestion-cli.md)。小红书实况仍属后续范围。
 

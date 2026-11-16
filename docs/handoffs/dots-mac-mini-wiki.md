@@ -1,5 +1,15 @@
 # 给 dots：Mac mini Wiki 接管与日常处理说明
 
+## 当前状态（2026-11-16）
+
+当前正式 CLI、skill、worker 和 Wiki 写入端在 MacBook Air，Mini 运行已验收的通用媒体转录服务。CLI/skill和音视频文件入口已实现；dots 真实发起调用、可独立安装发行包与 LLM Wiki 新环境安装尚在新任务中验收。
+
+优先阅读 [dots 调用与独立发行规格](../specs/dots-independent-distribution.md)、[CLI 契约](../contracts/ingestion-cli.md) 和 [通用媒体真实验收](../reviews/generic-media-acceptance-2026-11-16.md)。配置准备见 [示例说明](../../config/examples/README.md)。用户已确认先验收 dots 调用现有链路，再做独立发行，不以此任务自动迁移正式 Wiki。
+
+下文保留2026-11-01的迁移记录与当时建议。“没有CLI/skill”“没有文件上传”等是历史状态；电脑连接能力以 [当前官方说明](https://learn.chatgpt.com/docs/dots/computers-and-apps) 为准。实际dots入口验收需由dot发起，不能用Codex自行执行CLI替代。
+
+---
+
 日期：2026-11-01。本文可整体交给 dots。用户目标和数据边界已确认；下文明确区分现有能力、部署缺口和建议接口。文档不是“已上线”证明。
 
 ## 1. 你的任务

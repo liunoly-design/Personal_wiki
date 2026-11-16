@@ -1,0 +1,12 @@
+{
+  "profile_kind": "installation-requirements-not-native-app-state",
+  "upstream_manifest": "upstream-nashsu.json",
+  "vault": "/ABSOLUTE/PATH/Personal-Wiki-Vault",
+  "desired_settings": {
+    "api_enabled": true,
+    "api_origin": "http://127.0.0.1:19828",
+    "native_auto_ingest": false,
+    "embedding_enabled": false
+  },
+  "private_credentials": "INITIALIZE_ON_TARGET_HOST_DO_NOT_COPY_EXISTING_APP_STATE"
+}
