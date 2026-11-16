@@ -1,5 +1,7 @@
 # 个人 Wiki / Personal Wiki
 
+2026-11-16 第二批已完成：普通网页、小红书图文均通过全文获取、Markdown/本机 OCR、LLM Wiki 入库与读回检索的真实验收，CLI、skill 和 worker 已启用。两轮失败后的真实维护、版本启用及补跑已实测；原件、幂等与人工内容保护继续生效。[第二批交付报告](docs/reviews/web-xiaohongshu-ingestion-acceptance-2026-11-16.md)、[CLI 契约](docs/contracts/ingestion-cli.md)。小红书视频/实况与通用媒体转录仍由后续 #50 接入。
+
 2026-11-16：[三层摄取规格](docs/specs/three-layer-ingestion.md)首批已实现，指定 X、公众号、Mini 抖音均完成入库与全文检索核验，CLI、skill 和本机 worker 已安装。支持只转换、待补补料及自动维护。[交付报告](docs/reviews/three-source-ingestion-acceptance-2026-11-16.md)、[CLI 契约](docs/contracts/ingestion-cli.md)、[开发任务](docs/plans/three-source-ingestion-tickets.md)。本机 Wiki 继续作为当前写入端；Mini Wiki 接管、通用媒体上传与其他平台仍按报告列为后续，下面记录按其日期理解。
 
 2026-11-01 新部署方向：dots 连接 Mac mini，Mini 同机运行 LLM Wiki、主库和受保护处理程序。请先读 [给 dots 的接管说明](docs/handoffs/dots-mac-mini-wiki.md) 与 [更新后的架构](架构与数据.md)。当前已迁入数据和代码，尚未完成 LLM Wiki 注册、内容 skill 和生产切换；下方旧版本安装说明保留为历史。

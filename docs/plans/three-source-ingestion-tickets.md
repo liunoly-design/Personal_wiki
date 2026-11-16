@@ -1,4 +1,4 @@
-# SPEC #40 首批开发任务
+# SPEC #40 摄取开发任务
 
 来源：[三层资料摄取规格](../specs/three-layer-ingestion.md) / [SPEC #40](https://github.com/liunoly-design/Personal_wiki/issues/40)。用户已要求拆分并开始实现，优先 X、抖音、公众号。测试边界沿用已确认的记录、只转换及其任务恢复行为。
 
@@ -15,6 +15,8 @@
 | [#49](https://github.com/liunoly-design/Personal_wiki/issues/49) | 第二批：小红书单笔记图文/视频接入 | #41、#45、#47 |
 | [#50](https://github.com/liunoly-design/Personal_wiki/issues/50) | 后续：Mini 通用文件/X 视频持久转写接口 | #44、#47 |
 
-本表记录依赖和范围；状态以各 Issue 与最终验收报告为准。SPEC #40 保持父规格，不在本轮关闭。后续普通网页和小红书单独接入，未在此提前宣称完成。
+本表记录依赖和范围；状态以各 Issue 与最终验收报告为准。SPEC #40 保持父规格，不在本轮关闭。第二批普通网页与小红书图文已独立真实验收并关闭 #48/#49；视频与实况缺少通用媒体入口时准确待补，#50 保持后续。
 
 首批实现及验证见 [三来源交付报告](../reviews/three-source-ingestion-acceptance-2026-11-16.md)。
+
+第二批实现、真实入库、维护补跑和复审见 [网页与小红书交付报告](../reviews/web-xiaohongshu-ingestion-acceptance-2026-11-16.md)。
