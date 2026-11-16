@@ -237,3 +237,22 @@ test('recording text uses Wiki compilation without Flash and verifies the publis
   assert.equal((await service.run(job.id)).status,'waiting_verification');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('a rejected knowledge path is fed back on recovery without reacquiring or rewriting the source',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-generation-repair-'))),vault=join(root,'vault');
+ try{
+  await mkdir(vault);let generations=0,analyses=0;
+  const service=await openIngestion({stateDir:join(root,'state'),vault,python:'/usr/bin/python3'},{
+   api:{read:path=>readFile(join(vault,path),'utf8'),search:async()=>({results:[{path:'wiki/sources/recovery-note.md'}]})},
+   generate:async({stage,prompt})=>{
+    if(stage==='analysis'){analyses++;return '分析';}
+    generations++;
+    const path=prompt.includes('此前候选未通过路径核验')?'wiki/concepts/skill-selection.md':'wiki/concepts/技能选择.md';
+    return `---FILE: wiki/sources/recovery-note.md---\n# 笔记\n来源摘要。\n---END FILE---\n---FILE: ${path}---\n# 技能选择\n保留来源。\n---END FILE---`;
+   }
+  });
+  const text='# 原始笔记\n\n完整原话与末段证据应原样保留。';const job=await service.submit({text,name:'recovery-note'});
+  assert.equal((await service.run(job.id)).status,'waiting_publication');
+  const recovered=await service.run(job.id);assert.equal(recovered.status,'complete',recovered.failure);assert.equal(await readFile(recovered.bundle.markdown,'utf8'),text);assert.equal(analyses,1);assert.equal(generations,2);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
