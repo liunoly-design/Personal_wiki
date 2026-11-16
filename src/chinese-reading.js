@@ -77,7 +77,7 @@ export async function buildChineseReading({vault,record,translate,python,signal,
  const cache=join(vault,'.personal-wiki/readings',record.id);
  try{return JSON.parse(await readFile(join(cache,'result.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
  const original=await readFile(join(record.archive,'article.md'),'utf8');
- const content=[],pending=[];
+ const content=[],pending=[],pendingByKey=new Map();
  // Extraction metadata stays in the immutable original, not in translated prose.
  const body=original.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u,'');
  if(preparedModel)return store({operation:'reading',vault,sourceId:record.id,content:body,model:preparedModel},{python,signal});
@@ -88,7 +88,10 @@ export async function buildChineseReading({vault,record,translate,python,signal,
   const {masked,preserved}=protect(unit.text);
   const key=createHash('sha256').update('gpt-5.6-terra:v1:'+unit.text).digest('hex');
   try{content.push(await readFile(join(cache,'units',key+'.md'),'utf8'));continue;}catch(e){if(e.code!=='ENOENT')throw e;}
-  pending.push({index:content.length,key,text:unit.text,masked,preserved});content.push(null);
+  const duplicate=pendingByKey.get(key);
+  if(duplicate)duplicate.positions.push(content.length);
+  else{const next={index:content.length,positions:[content.length],key,text:unit.text,masked,preserved};pending.push(next);pendingByKey.set(key,next);}
+  content.push(null);
  }
  const rejection=key=>({operation:'reading-rejection',vault,sourceId:record.id,key});
  const feedbackFor=async key=>{const {feedback}=await store(rejection(key),{python,signal});return feedback?.maskVersion===maskVersion?feedback:undefined;};
@@ -97,7 +100,7 @@ export async function buildChineseReading({vault,record,translate,python,signal,
   let restored;
   try{restored=restore(unit.text,translated,unit.preserved);}
   catch(error){await reject(unit.key,error.message,translated);throw error;}
-  await store({operation:'reading-unit',vault,sourceId:record.id,key:unit.key,content:restored},{python,signal});content[unit.index]=restored;
+  await store({operation:'reading-unit',vault,sourceId:record.id,key:unit.key,content:restored},{python,signal});for(const index of unit.positions)content[index]=restored;
  };
  if(typeof translate.batch==='function'){
   const batches=[];let batch=[],size=0;
