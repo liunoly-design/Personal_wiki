@@ -2,6 +2,8 @@
 
 2026-11-16 新任务：用户确认先验收 dots 实际调用，再独立发行 CLI、Mini 完整服务、Wiki 接入及 LLM Wiki 安装配置。dots 文字与公开媒体入口已由用户真实发起并复核通过，独立安装包已发布 [0.9.1](https://github.com/liunoly-design/Personal_wiki/releases/tag/distribution-v0.9.1)，下载校验、隔离安装升级及实际入库通过；见 [规格与验收指令](docs/specs/dots-independent-distribution.md)、[配置样例](config/examples/README.md) 、[独立安装说明](docs/independent-install.md)、[LLM Wiki 安装配置](docs/llm-wiki-install.md) 和 [任务 #51](https://github.com/liunoly-design/Personal_wiki/issues/51)。
 
+CLI 管理 App 集成请读 [开发交接文档](docs/handoffs/cli-manager-integration.md)，其中列明0.9.1已实现接口、App侧建议和待扩展能力。
+
 2026-11-16 通用媒体接口：本地音视频、小红书视频、X 视频复用 Mini 单路转录队列，带来源/哈希/时长证据和完整时间戳 Markdown。实现与真实验收见 [通用媒体报告](docs/reviews/generic-media-acceptance-2026-11-16.md)，调用见 [CLI 契约](docs/contracts/ingestion-cli.md)。
 2026-11-16 第二批已完成：普通网页、小红书图文均通过全文获取、Markdown/本机 OCR、LLM Wiki 入库与读回检索的真实验收，CLI、skill 和 worker 已启用。两轮失败后的真实维护、版本启用及补跑已实测；原件、幂等与人工内容保护继续生效。[第二批交付报告](docs/reviews/web-xiaohongshu-ingestion-acceptance-2026-11-16.md)、[CLI 契约](docs/contracts/ingestion-cli.md)。小红书实况仍属后续范围。
 
