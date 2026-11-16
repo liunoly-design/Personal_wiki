@@ -11,5 +11,10 @@
 | [#45](https://github.com/liunoly-design/Personal_wiki/issues/45) | 两轮待补、手工正文/截图补料、阶段续作和去重 | #42、#43、#44 |
 | [#46](https://github.com/liunoly-design/Personal_wiki/issues/46) | Codex 开发 session 交接、回归、版本化启用、skill | #45 |
 | [#47](https://github.com/liunoly-design/Personal_wiki/issues/47) | 三来源真实样本、回归、重启恢复与审查报告 | #42、#43、#44、#45、#46 |
+| [#48](https://github.com/liunoly-design/Personal_wiki/issues/48) | 第二批：普通网页正式接入与独立验收 | #41、#45、#47 |
+| [#49](https://github.com/liunoly-design/Personal_wiki/issues/49) | 第二批：小红书单笔记图文/视频接入 | #41、#45、#47 |
+| [#50](https://github.com/liunoly-design/Personal_wiki/issues/50) | 后续：Mini 通用文件/X 视频持久转写接口 | #44、#47 |
 
 本表记录依赖和范围；状态以各 Issue 与最终验收报告为准。SPEC #40 保持父规格，不在本轮关闭。后续普通网页和小红书单独接入，未在此提前宣称完成。
+
+首批实现及验证见 [三来源交付报告](../reviews/three-source-ingestion-acceptance-2026-11-16.md)。
