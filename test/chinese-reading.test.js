@@ -103,8 +103,8 @@ test('Chinese prose and signed links stay verbatim while a separate English OCR 
  const root=await mkdtemp(join(tmpdir(),'wiki-reading-language-'));
  try{
   const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);
-  const chinese='中文正文应逐字保留，链接不是英文正文。[出处](https://example.org/'+('tracking-'.repeat(100))+')';const original=chinese+'\n\n2024. Large language models improved.';await writeFile(join(snapshot,'article.md'),original);
-  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async({text})=>{assert.ok(!text.includes('中文正文'),'native prose must remain outside the translation request');return text.replace('Large language models improved.','大语言模型取得了进步。');},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/mixed-language.md---\n# 混合资料\n摘要。\n---END FILE---'});
+  const chinese='中文正文应逐字保留，链接不是英文正文。[出处](https://example.org/'+('tracking-'.repeat(100))+')';const original=chinese+'\n\n### images/image-001.png\n\n2024. Large language models improved.';await writeFile(join(snapshot,'article.md'),original);
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async({text})=>{assert.ok(!text.includes('中文正文'),'native prose must remain outside the translation request');assert.ok(!text.includes('images/image-001.png'),'asset identifiers are not prose');return text.replace('Large language models improved.','大语言模型取得了进步。');},generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/mixed-language.md---\n# 混合资料\n摘要。\n---END FILE---'});
   const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'mixed-language',url:'https://example.org/mixed'});assert.equal(result.reading.status,'complete');const reading=await readFile(result.reading.path,'utf8');assert.ok(reading.includes('中文正文应逐字保留，链接不是英文正文。'));assert.match(reading,/2024\. 大语言模型取得了进步/);assert.equal(await readFile(join(result.archive,'article.md'),'utf8'),original);
  }finally{await rm(root,{recursive:true,force:true});}
 });

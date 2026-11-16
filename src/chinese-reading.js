@@ -46,7 +46,7 @@ function units(markdown){
 function protect(text){
  const prefix='WIKI_KEEP_'+createHash('sha256').update(text).digest('hex').slice(0,10)+'_';
  const preserved=[];
- const masked=text.replace(/^[ \t]*(?:#{1,6} |[-*+] |\d+[.)] )|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$[^$\n]+\$|(?<=\]\()<?[^\s)]+>?|https?:\/\/[^\s<>]+/gmu,value=>{const token=prefix+preserved.length.toString().padStart(4,'0');preserved.push({token,value});return token;});
+ const masked=text.replace(/^#{1,6} images\/[^\n]+$|^[ \t]*(?:#{1,6} |[-*+] |\d+[.)] )|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$[^$\n]+\$|(?<=\]\()<?[^\s)]+>?|https?:\/\/[^\s<>]+/gmu,value=>{const token=prefix+preserved.length.toString().padStart(4,'0');preserved.push({token,value});return token;});
  return {masked,preserved};
 }
 function restore(source,translated,preserved){
