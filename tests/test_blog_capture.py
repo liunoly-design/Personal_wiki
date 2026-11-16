@@ -1,9 +1,38 @@
 import unittest, tempfile
+from urllib.error import URLError
 from pathlib import Path
 from unittest.mock import patch
 from scripts.capture_article import capture
 
 class BlogCaptureTest(unittest.TestCase):
+ def test_fake_ip_dns_transport_failure_recovers_and_keeps_required_image(self):
+  html=b'<article><h1>Public article</h1><p>First section.</p><img src="https://cdn.example.org/chart.webp"><p>Final evidence.</p></article>'
+  image=b'RIFF\x10\x00\x00\x00WEBPVP8 synthetic image'
+  class DNS:
+   def __enter__(self):return self
+   def __exit__(self,*args):pass
+   def read(self,limit):return b'{"Status":0,"Answer":[{"type":1,"data":"93.184.216.34"}]}'
+  class Response:
+   status=200
+   def __init__(self,data):self.data=data
+   def getheader(self,name):return None
+   def read(self,limit):return self.data
+  class Connection:
+   def request(self,method,target,headers):self.target=target
+   def getresponse(self):return Response(image if self.target=='/chart.webp' else html)
+   def close(self):pass
+  def dns(request,timeout):
+   if 'cdn.example.org' in request.full_url and 'dns.google' in request.full_url:
+    raise URLError('synthetic TLS EOF')
+   return DNS()
+  with tempfile.TemporaryDirectory() as temp,patch('socket.getaddrinfo',return_value=[(2,1,6,'',('198.18.0.8',443))]),patch('urllib.request.urlopen',side_effect=dns) as doh,patch('scripts.blog_capture.PinnedHTTPS',side_effect=lambda *args:Connection()):
+   result=capture('https://example.org/article',temp)
+   package=Path(result['directory'])
+   self.assertEqual(result['status'],'complete')
+   self.assertIn('Final evidence.',(package/'article.md').read_text())
+   self.assertIn('images/image-001.webp',(package/'article.md').read_text())
+   self.assertEqual((package/'images/image-001.webp').read_bytes(),image)
+   self.assertTrue(any('dns.alidns.com' in call.args[0].full_url for call in doh.call_args_list))
  def test_unrecognized_image_bytes_stay_in_pending_materials(self):
   original=b'\x00\x00\x00\x20ftypavifsynthetic-unrecognized-image'
   def fetch(url,limit,dest,**kwargs):

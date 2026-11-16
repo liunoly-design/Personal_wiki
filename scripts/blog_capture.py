@@ -47,8 +47,14 @@ def resolve_public(url, doh_endpoint='https://dns.google/resolve'):
         addresses = {entry[4][0] for entry in socket.getaddrinfo(u.hostname,443,type=socket.SOCK_STREAM)}
         if not addresses or any(ipaddress.ip_address(a) not in ipaddress.ip_network('198.18.0.0/15') for a in addresses):raise
         if doh_endpoint not in ('https://dns.google/resolve','https://dns.alidns.com/resolve'):raise ValueError('Unsupported DNS provider')
-        request=urllib.request.Request(doh_endpoint+'?name='+quote(u.hostname,safe='')+'&type=A',headers={'Accept':'application/dns-json'})
-        with urllib.request.urlopen(request,timeout=20) as response:answer=json.loads(response.read(65536))
+        endpoints=(doh_endpoint, 'https://dns.alidns.com/resolve' if doh_endpoint=='https://dns.google/resolve' else 'https://dns.google/resolve')
+        for index, endpoint in enumerate(endpoints):
+            request=urllib.request.Request(endpoint+'?name='+quote(u.hostname,safe='')+'&type=A',headers={'Accept':'application/dns-json'})
+            try:
+                with urllib.request.urlopen(request,timeout=20) as response:answer=json.loads(response.read(65536))
+                break
+            except OSError:
+                if index==len(endpoints)-1:raise
         addresses=[a['data'] for a in answer.get('Answer',[]) if a.get('type')==1]
         if answer.get('Status')!=0 or not addresses or any(not ipaddress.ip_address(a).is_global or ipaddress.ip_address(a).is_multicast for a in addresses):raise ValueError('Public DNS resolution unavailable')
         return u,addresses
