@@ -4,6 +4,46 @@ from unittest.mock import patch
 from scripts.capture_article import capture
 
 class BlogCaptureTest(unittest.TestCase):
+ def test_login_form_and_explicit_truncation_do_not_publish_as_articles(self):
+  for html in ['<main><h1>Account</h1><form><input type="password"></form><p>Sign in to read the full article.</p></main>','<article data-truncated="true"><h1>Preview</h1><p>Only the beginning is available here.</p></article>']:
+   def fetch(url,limit,dest,**kwargs):dest.write_text(html);return url
+   with tempfile.TemporaryDirectory() as temp,patch('scripts.blog_capture.fetch_public',side_effect=fetch):
+    with self.assertRaisesRegex(ValueError,'incomplete'):capture('https://example.org/gated',temp)
+ def test_extensionless_body_image_remains_local_and_available_for_ocr(self):
+  def fetch(url,limit,dest,**kwargs):
+   dest.write_bytes(b'\x89PNG\r\n\x1a\nsynthetic' if url.endswith('/image') else b'<article><h1>Image evidence</h1><p>Complete body and final paragraph.</p><img src="/image"></article>');return url
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.blog_capture.fetch_public',side_effect=fetch):
+   result=capture('https://example.org/article',temp);package=Path(result['directory'])
+   self.assertEqual(result['status'],'complete');self.assertIn('images/image-001.png',(package/'article.md').read_text());self.assertTrue((package/'images/image-001.png').exists())
+ def test_render_fallback_converts_script_article_and_keeps_both_originals(self):
+  html='<html><meta charset="utf-8"><title>Dynamic article</title><main>Loading...</main><script>document.querySelector("main").innerHTML="<article><h1>动态正文</h1><p>这是动态渲染后的完整文章正文，保留脚本生成的最后一句证据。</p></article>"</script></html>'
+  def fetch(url,limit,dest,**kwargs):
+   dest.write_bytes(html.encode());kwargs.get('response_metadata',{}).update(content_type='text/html');return url
+  with tempfile.TemporaryDirectory() as temp,patch('scripts.blog_capture.fetch_public',side_effect=fetch):
+   with self.assertRaisesRegex(ValueError,'incomplete'):capture('https://example.org/dynamic',str(Path(temp)/'static'))
+   result=capture('https://example.org/dynamic',str(Path(temp)/'rendered'),render=True)
+   package=Path(result['directory']);self.assertEqual(result['status'],'complete');self.assertIn('最后一句证据',(package/'article.md').read_text())
+   self.assertTrue((package/'original.html').exists());self.assertTrue((package/'rendered.html').exists())
+ def test_fake_ip_resolver_uses_only_validated_public_answers_and_still_rejects_private_dns(self):
+  from scripts.blog_capture import fetch_public
+  class DNS:
+   def __enter__(self):return self
+   def __exit__(self,*args):pass
+   def read(self,limit):return b'{"Status":0,"Answer":[{"type":1,"data":"93.184.216.34"}]}'
+  class Response:
+   status=200
+   def getheader(self,name):return None
+   def read(self,limit):return b'public'
+  class Connection:
+   def request(self,*args,**kwargs):pass
+   def getresponse(self):return Response()
+   def close(self):pass
+  with tempfile.TemporaryDirectory() as temp,patch('socket.getaddrinfo',return_value=[(2,1,6,'',('198.18.0.8',443))]),patch('urllib.request.urlopen',return_value=DNS()),patch('scripts.blog_capture.PinnedHTTPS',return_value=Connection()) as connection:
+   fetch_public('https://example.org/article',1000,Path(temp)/'body')
+   self.assertEqual(connection.call_args.args,('example.org','93.184.216.34'))
+  with tempfile.TemporaryDirectory() as temp,patch('socket.getaddrinfo',return_value=[(2,1,6,'',('10.0.0.1',443))]),patch('urllib.request.urlopen') as dns:
+   with self.assertRaises(ValueError):fetch_public('https://example.org/article',1000,Path(temp)/'body')
+   dns.assert_not_called()
  def test_complete_structure_and_missing_image_are_reported(self):
   html='<html><title>Public blog</title><nav>unrelated</nav><article><h1>Public blog</h1><p>First paragraph with <a href="/ref">reference</a>.</p><img src="/photo.png"><h2>Last section</h2><table><tr><th>A</th></tr><tr><td>B</td></tr></table><pre><code>x = 1</code></pre><p>Final evidence.</p></article></html>'
   def fetch(url,limit,dest):

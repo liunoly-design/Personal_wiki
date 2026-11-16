@@ -6,7 +6,7 @@ import {acquireQueueLease} from './task-queue.js';
 import {collectCanonical,verifyPublication} from './canonical-library.js';
 import {localNashsuAPI} from './nashsu-api.js';
 import {validSlug} from './wk.js';
-import {identifyInput,inputURLs,captureArticle} from './source-acquisition.js';
+import {identifyInput,inputURLs,captureArticle,supportedSource} from './source-acquisition.js';
 import {startMaintenance,repairIngestion,updateMaintenance} from './ingestion-maintenance.js';
 import {MediaServiceClient} from './media-service-client.js';
 import {hostname} from 'node:os';
@@ -50,9 +50,9 @@ export async function openIngestion(config,ports={}){
   const id=hash(requestId??mode+':'+source.url+':'+background+(refresh?':'+randomUUID():''));
   const payloadHash=hash(JSON.stringify({mode,url:source.url,name:name??source.name,background,refresh}));
   return lock('ingress',async()=>{
-   const prior=await optionalJSON(pathFor(id));if(prior){if(prior.payloadHash&&prior.payloadHash!==payloadHash)throw Error('Request identity conflict');return prior;}
+   const prior=await optionalJSON(pathFor(id));if(prior){if(prior.payloadHash&&prior.payloadHash!==payloadHash)throw Error('Request identity conflict');if(source.fetchUrl&&source.fetchUrl!==prior.fetchUrl)return lock('source-'+hash(source.url),async()=>{const latest=await status(id);if(!latest.bundle){latest.fetchUrl=source.fetchUrl;latest.input={input};await persist(latest);}return latest;});return prior;}
    const cached=!refresh?await optionalJSON(join(root,'bundles',hash(source.url)+'.json')):null;
-   const job={id,mode,payloadHash,input:text!==undefined?{text}:{input},name:name??source.name,platform:source.platform,url:source.url,background,refresh,status:'queued',rounds:0,createdAt:new Date().toISOString(),...(cached?{bundle:cached}:{})};
+   const job={id,mode,payloadHash,input:text!==undefined?{text}:{input},name:name??source.name,platform:source.platform,url:source.url,...(source.fetchUrl?{fetchUrl:source.fetchUrl}:{}),background,refresh,status:'queued',rounds:0,createdAt:new Date().toISOString(),...(cached?{bundle:cached}:{})};
    await persist(job);return job;
   });
  }
@@ -66,9 +66,9 @@ export async function openIngestion(config,ports={}){
    if(job.supplementFile){const note=JSON.stringify({kind:'user-provided',url:job.url,supplements:job.supplements},null,2);await exclusive(join(directory,'supplement.json'),note);hashes['supplement.json']=hash(note);}
    if(job.supplementImage){const bytes=await readFile(job.supplementImage.file);await exclusive(join(directory,job.supplementImage.name),bytes);hashes[job.supplementImage.name]=hash(bytes);}
   }else{
-   const captured=await (ports.capture??captureArticle)({job,config:{...config,onStage:async(stage,details)=>{job.stage=stage;job.details=details;await persist(job);}},directory:join(root,'work',job.id,'capture',String(job.generation??0)+'-'+job.rounds),signal:ports.signal});
+   const captured=await (ports.capture??captureArticle)({job,config:{...config,onStage:async(stage,details)=>{job.stage=stage;job.details=details;if(details?.directory)job.pendingMaterials=details.directory;await persist(job);}},directory:join(root,'work',job.id,'capture',String(job.generation??0)+'-'+job.rounds),signal:ports.signal});
    job.pendingMaterials=captured.directory;job.lastCapture=captured;await persist(job);
-   if(captured.contextStatus==='partial'||captured.status!=='complete')throw Error('Source incomplete; materials retained in pending area');
+   if(captured.contextStatus==='partial'||captured.status!=='complete')throw Error(captured.failure??'Source incomplete; materials retained in pending area');
    const copy=async(dir,prefix='')=>{for(const entry of await readdir(dir,{withFileTypes:true})){
     const name=prefix+entry.name;if(entry.isSymbolicLink())throw Error('Capture symlink rejected');
     if(entry.isDirectory())await copy(join(dir,entry.name),name+'/');
@@ -82,6 +82,7 @@ export async function openIngestion(config,ports={}){
   return verifyBundle({directory,markdown,url:canonicalUrl,platform:job.platform,hashes,complete:true,...(preparedReadingModel?{preparedReadingModel}:{})});
  }
  function waitReason(message){
+  if(/public access gated/iu.test(message))return 'waiting_access';
   if(/quota|capacity|额度/iu.test(message))return 'waiting_capacity';
   if(/confirmation|超过|1.?GB|30.?minutes/iu.test(message))return 'waiting_confirmation';
   if(/waiting_login|(?:login|captcha|authentication).{0,20}(?:required|expired|detected)|(?:登录|验证码).{0,8}(?:失效|需要|出现)|HTTP 401|HTTP 403/iu.test(message.replace(/login may be required/giu,'')))return 'waiting_login';
@@ -90,7 +91,7 @@ export async function openIngestion(config,ports={}){
  }
  async function maintenance(job){
   if(job.maintenanceReplay){job.nextAction='maintenance_replay_failed';return;}
-  if(!['x','wechat','douyin','text'].includes(job.platform)){job.nextAction='source_support_planned';return;}
+  if(!supportedSource(job.platform)){job.nextAction='source_support_planned';return;}
   const fingerprint=hash(job.platform+':'+(config.processorVersion??'1')+':'+(job.maintenanceGeneration??0)+':'+job.failure.replace(/https?:\/\/\S+/gu,'[source]').slice(0,200));
   let launch=false;
   const request=await updateMaintenance(config,fingerprint,previous=>{
@@ -128,10 +129,10 @@ export async function openIngestion(config,ports={}){
    try{await verifyBundle(job.bundle);if(job.status==='complete')await verifyWiki(job,ports.api??await localNashsuAPI(config.vault,{maxAttempts:1}));return finished(job);}
    catch(error){job.status='waiting_verification';job.failure=String(error.message).slice(0,2000);await persist(job);return job;}
   }
-  if(['pending','waiting_login','waiting_confirmation','waiting_capacity','waiting_dependency'].includes(job.status))return job;
+  if(['pending','waiting_access','waiting_login','waiting_confirmation','waiting_capacity','waiting_dependency'].includes(job.status))return job;
   while(!job.bundle&&job.rounds<2){
    job.status='processing';job.rounds++;await persist(job);
-   try{job.bundle=await snapshot(job);await saveJSON(join(root,'bundles',hash(job.url)+'.json'),job.bundle);job.status='converted';delete job.failure;await persist(job);}
+   try{job.bundle=await snapshot(job);await saveJSON(join(root,'bundles',hash(job.url)+'.json'),job.bundle);if(job.bundle.url!==job.url)await saveJSON(join(root,'bundles',hash(job.bundle.url)+'.json'),job.bundle);job.status='converted';delete job.failure;await persist(job);}
    catch(error){
     job.failure=String(error.message).replace(/Bearer\s+\S+/giu,'Bearer [redacted]').slice(0,2000);
     job.failures=[...(job.failures??[]),{round:job.rounds,generation:job.generation??0,at:new Date().toISOString(),reason:job.failure}];
@@ -146,6 +147,7 @@ export async function openIngestion(config,ports={}){
   if(job.mode==='convert'){job.status='converted';return finished(job);}
   if(job.mode==='record'){
    try{
+   await lock('publication-'+hash(job.bundle.url),async()=>{
    if(!isAbsolute(config.vault??''))throw Error('Absolute target vault required');
    const api=ports.api??await localNashsuAPI(config.vault,{maxAttempts:1});
    job.status='publishing';await persist(job);
@@ -158,6 +160,7 @@ export async function openIngestion(config,ports={}){
    await verifyWiki(job,api);
    await saveJSON(join(root,'publications',hash(job.bundle.url)+'.json'),job.result);
    job.status='complete';await finished(job);
+   });
    }catch(error){job.failure=String(error.message).slice(0,2000);job.status=waitReason(job.failure)??'waiting_publication';await persist(job);}
   }
   return job;

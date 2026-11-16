@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,realpath} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
@@ -9,6 +9,70 @@ const exec=promisify(execFile);
 const cli=new URL('../scripts/wiki.mjs',import.meta.url).pathname;
 import {openIngestion} from '../src/ingestion.js';
 import {updateMaintenance} from '../src/ingestion-maintenance.js';
+
+test('Xiaohongshu share credentials are retained for capture while note identity deduplicates signatures',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-xhs-')));
+ try{
+  const captured=join(root,'package');await mkdir(captured);await writeFile(join(captured,'article.md'),'# 单篇笔记\n\n完整正文与最后一句。');
+  let fetchURL;
+  const config={stateDir:join(root,'state'),python:'/usr/bin/python3'};
+  const service=await openIngestion(config,{capture:async({job})=>{fetchURL=job.fetchUrl;return {directory:captured,status:'complete'};}});
+  const job=await service.submit({input:'复制分享 https://www.xiaohongshu.com/explore/64abcdef0123456789abcdef?xsec_token=synthetic-one&xsec_source=pc_share',mode:'convert'});
+  assert.equal(job.platform,'xiaohongshu');assert.equal(job.url,'https://www.xiaohongshu.com/explore/64abcdef0123456789abcdef');
+  const done=await service.run(job.id);assert.equal(done.status,'converted');assert.match(fetchURL,/xsec_token=synthetic-one/);
+  const repeat=await service.submit({input:'https://www.xiaohongshu.com/discovery/item/64abcdef0123456789abcdef?xsec_token=synthetic-two',mode:'convert'});
+  assert.equal(repeat.id,done.id);assert.equal((await service.run(repeat.id)).bundle.markdown,done.bundle.markdown);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('supported webpages get bounded repair while unimplemented social sources do not',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-web-maint-')));
+ try{
+  const service=await openIngestion({stateDir:join(root,'state'),python:'/usr/bin/python3'},{capture:async()=>{throw Error('Synthetic missing article structure');}});
+  const job=await service.submit({input:'https://example.org/article',mode:'convert'});
+  const pending=await service.run(job.id);assert.equal(pending.rounds,2);assert.ok(pending.maintenance);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('gated Xiaohongshu access waits without inventing login requirements; new credentials keep the recovery budget',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-xhs-access-')));
+ try{
+  const service=await openIngestion({stateDir:join(root,'state'),python:'/usr/bin/python3'},{capture:async()=>{throw Error('Xiaohongshu public access gated; complete share URL or authorized session needed');}});
+  const base='https://www.xiaohongshu.com/explore/64abcdef0123456789abcdef';
+  const job=await service.submit({input:base+'?xsec_token=old',mode:'convert'});
+  const gated=await service.run(job.id);assert.equal(gated.status,'waiting_access');assert.equal(gated.maintenance,undefined);
+  const updated=await service.submit({input:base+'?xsec_token=new',mode:'convert'});
+  assert.equal(updated.id,job.id);assert.equal(updated.rounds,gated.rounds);assert.match(updated.fetchUrl,/token=new/);
+  assert.equal((await service.run(job.id)).rounds,gated.rounds);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('incomplete video retains acquired materials and waits for the missing transcription dependency',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-xhs-video-')));
+ try{
+  const packageDir=join(root,'package');await mkdir(packageDir);await writeFile(join(packageDir,'article.md'),'说明与封面不是完整视频。');
+  const service=await openIngestion({stateDir:join(root,'state'),python:'/usr/bin/python3'},{capture:async()=>({directory:packageDir,status:'partial',failure:'Video transcription required; generic media interface not configured'})});
+  const job=await service.submit({input:'https://www.xiaohongshu.com/explore/64abcdef0123456789abcdef',mode:'convert'});
+  const pending=await service.run(job.id);assert.equal(pending.status,'waiting_dependency');assert.equal(pending.pendingMaterials,packageDir);assert.equal(pending.bundle,undefined);assert.equal(pending.maintenance,undefined);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('concurrent short and signed note links publish only one canonical Wiki source',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-note-alias-'))),vault=join(root,'vault');
+ try{
+  await mkdir(vault);const directory=join(root,'package');await mkdir(directory);await writeFile(join(directory,'article.md'),'# 图文笔记\n\n这是需要完整保留的正文以及用于核对的末段证据。');
+  const canonical='https://www.xiaohongshu.com/explore/64abcdef0123456789abcdef';let arrivals=0,release,modelCalls=0;const both=new Promise(r=>release=r);
+  const service=await openIngestion({stateDir:join(root,'state'),vault,python:'/usr/bin/python3'},{
+   capture:async()=>{if(++arrivals===2)release();await both;return {directory,status:'complete',url:canonical};},
+   api:{read:path=>readFile(join(vault,path),'utf8'),search:async()=>({results:(await readdir(join(vault,'wiki/sources'))).map(n=>({path:'wiki/sources/'+n}))})},
+   generate:async({stage,sourceName})=>{modelCalls++;return stage==='analysis'?'分析':`---FILE: wiki/sources/${sourceName}.md---\n# 图文笔记\n来源摘要。\n---END FILE---`;}
+  });
+  const a=await service.submit({input:'https://xhslink.cn/o/synthetic',mode:'record'}),b=await service.submit({input:canonical+'?xsec_token=synthetic',mode:'record'});
+  const initial=await Promise.all([service.run(a.id),service.run(b.id)]);
+  const final=await Promise.all(initial.map(j=>service.run(j.id)));
+  assert.ok(final.every(j=>j.status==='complete'));assert.equal(final[0].result.source,final[1].result.source);assert.equal((await readdir(join(vault,'wiki/sources'))).length,1);assert.equal(modelCalls,2);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 
 test('AI can convert text, inspect its durable task and reuse it without touching a Wiki',async()=>{
  const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-cli-')));

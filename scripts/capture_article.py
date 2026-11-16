@@ -40,7 +40,7 @@ def wechat_video_pending(metadata, html):
     return any('v.qq.com/' in (n.get('src','')+n.get('data-src','')) or 'video_player' in (n.get('src','')+n.get('data-src','')) for n in body.select('iframe'))
 
 
-def capture(url, output, browser_profile=None):
+def capture(url, output, browser_profile=None, render=False):
     out=Path(output);out.mkdir(parents=True,exist_ok=True)
     receipt=out/'capture-result.json'
     if receipt.exists():
@@ -217,9 +217,9 @@ def capture(url, output, browser_profile=None):
             from .blog_capture import capture_blog
         except ImportError:
             from blog_capture import capture_blog
-        result=capture_blog(url,out)
+        result=capture_blog(url,out,render=render)
     atomic_json(receipt,result);return result
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--output',required=True);p.add_argument('--browser-profile');a=p.parse_args()
-    print(json.dumps(capture(a.url,a.output,a.browser_profile),ensure_ascii=False))
+    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--output',required=True);p.add_argument('--browser-profile');p.add_argument('--render',action='store_true');a=p.parse_args()
+    print(json.dumps(capture(a.url,a.output,a.browser_profile,render=a.render),ensure_ascii=False))

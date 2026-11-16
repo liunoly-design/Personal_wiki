@@ -1,6 +1,6 @@
 # AI 摄取 CLI 契约
 
-适用：SPEC #40 第一批 X、公众号、Mini 抖音与纯文字。CLI 可由 Codex、dots 或其他能执行本机命令的 AI 调用；底层不要求飞书消息 ID。实际运行须 Node 24+、配置的 Python 和目标 Wiki API；Mini 媒体接口单独配置。
+适用：SPEC #40 的 X、公众号、Mini 抖音、纯文字，以及第二批普通网页和小红书单笔记。CLI 可由 Codex、dots 或其他能执行本机命令的 AI 调用；底层不要求飞书消息 ID。实际运行须 Node 24+、配置的 Python 和目标 Wiki API；Mini 媒体接口单独配置。
 
 ## 命令
 
@@ -35,7 +35,7 @@
 
 ## 状态与完成
 
-`queued/processing/publishing` 表示执行阶段；`converted` 仅表示所请求转换已完成；`complete` 表示目标 Wiki 已核验。`pending`、`waiting_login`、`waiting_confirmation`、`waiting_capacity`、`waiting_dependency`、`waiting_publication`、`waiting_verification` 均有明确缺口。回执包含原输入、规范 URL、来源、哈希、产物与状态；属于私有数据，不上传到公开 Issue。
+`queued/processing/publishing` 表示执行阶段；`converted` 仅表示所请求转换已完成；`complete` 表示目标 Wiki 已核验。`pending`、`waiting_access`、`waiting_login`、`waiting_confirmation`、`waiting_capacity`、`waiting_dependency`、`waiting_publication`、`waiting_verification` 均有明确缺口。`waiting_access` 表示公开页访问受限或分享参数被拒，不能仅凭登录重定向断言必须登录。回执包含原输入、规范 URL、来源、哈希、产物与状态；属于私有数据，不上传到公开 Issue。
 
 正文或必需转录不完整不编译；原文完整而非正文附件、译文缺失的细分恢复仍沿用保护流程。查询完整记录完成状态会核验原件与目标 Wiki，人工知识段落继续保留。进程退出成功不替代回执的完成状态。
 
@@ -45,5 +45,7 @@
 - 公众号使用现有 MagicMD 和可选专用浏览器获取；完整正文和图片分别核验。正文以图片承载时做本机文字识别。
 - 图片在 macOS 使用 Apple Vision，本机识别，保留原始提取 Markdown、图片、识别 JSON 和机器文字；参考 [Apple 官方说明](https://developer.apple.com/documentation/vision/recognizing-text-in-images)。动图逐帧识别并保留帧记录，阅读稿去重且标首次出现帧；超过500帧或未知格式保留待补。识别结果未经人工校订，多栏顺序和识别准确性可有误。
 - 抖音复用现有 Mini 后端。当前 Mini 无通用文件/X 视频上传接口：这些输入保留原件或已有材料、准确显示待补，不能冒称已完整转录。后台服务的 health 就绪不等于某任务成功。
-- 普通网页现有获取器可作为通用尝试；新架构的普通网页/小红书验收属于第二批，不在本次宣称完成。
+- 普通网页先抓取公开静态 HTML；解析失败的第二轮用无账户的临时 Chrome 渲染，保留原始响应与渲染 DOM。各跳转及浏览器子请求均由固定公网 IP 的 HTTPS 获取器执行，拒绝内网、混合 DNS、非 HTTPS 和浏览器 WebSocket。正文、标题层级、表格、代码、图片与出处保留；明确截断、付费墙、加载空壳、缺图和未转录媒体留待补。需要 Chrome 和已固定的 Playwright 版本。
+- 小红书仅单篇图文/视频笔记；支持长链接及 `xhslink.com` / `xhslink.cn` 短链。分享参数保留于私有获取记录，稳定的笔记 ID 用于去重；严格校验最终笔记 ID，读取桌面详情或移动页 `noteData.data.noteData`，不取 feed/OG/预加载卡片当正文。按数组顺序保存服务端图片（不声称无损原图）并本机 OCR。新签名的同笔记链接重新提交后更新获取地址，再显式重试原任务。图文真实可用性依赖当前分享 URL；视频/实况在 Mini 通用媒体接口接入前停在 `waiting_dependency`。现场验收以各任务报告为准。
+- 本机 DNS 代理只返回 `198.18.0.0/15` FakeIP 时，可用固定 HTTPS DNS 查询校验后的公网地址，再固定连接；仍拒绝私网、混合结果及内网重定向。小红书使用阿里公共 DNS 保持大陆 CDN 地区，通用网页使用 Google 公共 DNS；不会连接 FakeIP。
 - Wiki 仍使用此次核实可用的本机生产实例，Mini 仅做媒体后端。Mini Wiki 接管、生产切换与备份方向调整另作实测，不因 CLI 上线自动执行。
