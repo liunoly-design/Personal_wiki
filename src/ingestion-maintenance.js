@@ -33,7 +33,26 @@ export async function activateRelease(config,project,version){
   }finally{await rm(archive,{force:true});await rm(stage,{recursive:true,force:true});}
  }
  const pointer=join(root,'current-'+process.pid);await symlink(release,pointer);await rename(pointer,join(root,'current'));
+ if(config.configPath){const latest=JSON.parse(await readFile(config.configPath,'utf8'));if(latest.stateDir!==config.stateDir||latest.runtimeRoot!==root)throw Error('Runtime configuration changed during activation');await saveJSON(config.configPath,{...latest,processorVersion:version});}
  return release;
+}
+
+async function replayVerified(config,request){
+ if(!request.activated||!config.runtimeRoot)return request;
+ const cli=join(config.runtimeRoot,'releases',request.version,'scripts/wiki.mjs');
+ for(let count=0;count<32;count++){
+  request=await optionalJSON(join(config.stateDir,'ingestion/maintenance',request.id+'.json'));
+  const task=request.tasks.find(id=>!(request.replayedTasks??[]).includes(id)&&!(request.resolvedTasks??[]).includes(id));
+  if(!task)break;
+  let status='failed';
+  try{
+   await exec(process.execPath,[cli,'retry',task,'--maintenance-replay',request.id,'--config',config.configPath],{timeout:30000});
+   const result=await exec(process.execPath,[cli,'run',task,'--config',config.configPath],{timeout:3600000,maxBuffer:2*1024*1024});
+   status=JSON.parse(result.stdout).status;
+  }catch{}
+  request=await updateMaintenance(config,request.id,latest=>({...latest,replayedTasks:[...new Set([...(latest.replayedTasks??[]),task])],replayResults:{...latest.replayResults,[task]:{status,version:request.version,at:new Date().toISOString()}}}));
+ }
+ return request;
 }
 
 // Runs in a separate worker, so a capture caller never has to stay alive while
@@ -47,7 +66,8 @@ export async function repairIngestion(config,id){
  let releaseProject;
  const persist=async()=>{request=await updateMaintenance(config,id,latest=>({...latest,...request,tasks:[...new Set([...(latest?.tasks??[]),...request.tasks])],resolvedTasks:[...new Set([...(latest?.resolvedTasks??[]),...(request.resolvedTasks??[])])]}));};
  try{
-  if(['verified','failed','running'].includes(request.status))return request;
+  if(['verified','source_recovered'].includes(request.status)&&request.activated)return await replayVerified(config,request);
+  if(['failed','running','waiting_session_result','source_recovered'].includes(request.status))return request;
   const project=config.maintenance?.project;
   if(!isAbsolute(project??'')){request.status='waiting_bridge';await persist();return request;}
   if(resolve(project)===resolve(import.meta.dirname,'..'))throw Error('Code repair requires a development checkout separate from the running release');
@@ -59,7 +79,7 @@ export async function repairIngestion(config,id){
   if((await exec('git',['status','--porcelain'],{cwd:project})).stdout.trim()){
    request.status='waiting_workspace';request.reason='Development checkout has uncommitted work; retained without concurrent edits';await persist();return request;
   }
-  request.status='starting';request.baseline=before;await persist();
+  request.status='starting';request.workerPid=process.pid;request.baseline=before;await persist();
   const output=join(directory,'response.md'),events=join(directory,'events.jsonl');
   const args=['-a','never','exec','--sandbox','workspace-write','--json','--output-last-message',output,...(config.compilerModel?['--model',config.compilerModel]:[]),'-'];
   let pending='',writes=Promise.resolve(),sessionId;
@@ -80,22 +100,18 @@ export async function repairIngestion(config,id){
   });
   await writes;
   if(code!==0||!sessionId)throw Error('Project development session did not complete with a confirmed session ID');
+  const candidate=(await exec('git',['rev-parse','HEAD'],{cwd:project})).stdout.trim();
   const commands=config.maintenance?.testCommands??[[process.execPath,'--test'],[config.python,'-m','unittest','discover','-s','tests','-v']];
   if(!Array.isArray(commands)||!commands.length)throw Error('Maintenance regression commands required');
   for(const command of commands){if(!Array.isArray(command)||!command.length||command.some(v=>typeof v!=='string'))throw Error('Invalid regression command');await exec(command[0],command.slice(1),{cwd:project,timeout:600000,maxBuffer:8*1024*1024});}
   const after=(await exec('git',['rev-parse','HEAD'],{cwd:project})).stdout.trim();
-  if(after===before||(await exec('git',['status','--porcelain'],{cwd:project})).stdout.trim())throw Error('Repair must produce a committed, regression-verified version');
+  if(after!==candidate||after===before||(await exec('git',['status','--porcelain'],{cwd:project})).stdout.trim())throw Error('Repair must produce an unchanged committed revision throughout regression');
   request.status='verified';request.version=after;request.testsPassed=true;request.finishedAt=new Date().toISOString();
   const release=config.runtimeRoot?await activateRelease(config,project,after):null;
   request.activated=Boolean(release);await persist();
   if(!release)return request;
-  // Re-import the repaired checkout in fresh processes; keep the original IDs.
-  for(const task of request.tasks){
-   const cli=resolve(release,'scripts/wiki.mjs');
-   await exec(process.execPath,[cli,'retry',task,'--config',config.configPath],{timeout:30000});
-   await exec(process.execPath,[cli,'run',task,'--config',config.configPath],{timeout:3600000,maxBuffer:2*1024*1024});
-  }
-  return request;
+  // Drain the durable unresolved membership, including tasks that joined late.
+  return await replayVerified(config,request);
  }catch(error){request.status='failed';request.reason=error.code==='ETIMEDOUT'?'Development session timed out':String(error.message).slice(0,1000);request.finishedAt=new Date().toISOString();await persist();return request;}
  finally{await releaseProject?.();await release();}
 }

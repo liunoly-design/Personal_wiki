@@ -89,18 +89,20 @@ export async function openIngestion(config,ports={}){
   return null;
  }
  async function maintenance(job){
+  if(job.maintenanceReplay){job.nextAction='maintenance_replay_failed';return;}
   if(!['x','wechat','douyin','text'].includes(job.platform)){job.nextAction='source_support_planned';return;}
   const fingerprint=hash(job.platform+':'+(config.processorVersion??'1')+':'+(job.maintenanceGeneration??0)+':'+job.failure.replace(/https?:\/\/\S+/gu,'[source]').slice(0,200));
   let launch=false;
   const request=await updateMaintenance(config,fingerprint,previous=>{
    const request=previous??{id:fingerprint,platform:job.platform,status:'waiting_bridge',tasks:[],createdAt:new Date().toISOString()};
    if(!request.tasks.includes(job.id))request.tasks.push(job.id);
+   if(request.status==='source_recovered'&&!request.activated)request.status='waiting_bridge';
    request.reason=job.failure.replace(/https?:\/\/\S+/gu,'[source]').slice(0,1200);
-   if(request.status==='waiting_bridge'&&config.maintenance?.project&&config.configPath){request.status='queued';launch=true;}
+   if((request.status==='waiting_bridge'||['verified','source_recovered'].includes(request.status)&&request.activated)&&config.maintenance?.project&&config.configPath){if(!request.activated)request.status='queued';request.nextAttemptAt=Date.now()+60000;launch=true;}
    return request;
   });
   job.maintenance={id:request.id,status:request.status};
-  if(launch&&!startMaintenance(config,request.id))await updateMaintenance(config,request.id,r=>({...r,status:'waiting_bridge'}));
+  if(launch&&!await (ports.dispatchMaintenance??(id=>startMaintenance(config,id)))(request.id))await updateMaintenance(config,request.id,r=>({...r,status:'waiting_bridge'}));
  }
  async function finished(job){
   delete job.failure;await persist(job);
@@ -181,7 +183,7 @@ export async function openIngestion(config,ports={}){
   new TextDecoder('utf-8',{fatal:true}).decode(supplied);
   job.supplementFile=readingFile;job.generation=(job.generation??0)+1;job.rounds=0;job.status='queued';delete job.bundle;delete job.result;await persist(job);return job;
  });}
- async function retry(id){const owner=await status(id);return lock('source-'+hash(owner.url),async()=>{const job=await status(id);if(job.status==='complete')throw Error('Task already complete');if(!job.bundle)job.generation=(job.generation??0)+1;job.maintenanceGeneration=(job.maintenanceGeneration??0)+1;job.recoveries=[...(job.recoveries??[]),{rounds:job.rounds,fromStatus:job.status,at:new Date().toISOString(),reason:'explicit-retry'}];job.rounds=0;job.status='queued';delete job.failure;await persist(job);return job;});}
+ async function retry(id,{maintenanceId}={}){const owner=await status(id);return lock('source-'+hash(owner.url),async()=>{const job=await status(id);if(job.status==='complete')throw Error('Task already complete');if(maintenanceId&&job.maintenance?.id!==maintenanceId)throw Error('Maintenance task binding mismatch');job.maintenanceReplay=maintenanceId??null;if(!job.bundle)job.generation=(job.generation??0)+1;job.maintenanceGeneration=(job.maintenanceGeneration??0)+1;job.recoveries=[...(job.recoveries??[]),{rounds:job.rounds,fromStatus:job.status,at:new Date().toISOString(),reason:maintenanceId?'verified-code-replay':'explicit-retry'}];job.rounds=0;job.status='queued';delete job.failure;await persist(job);return job;});}
  async function ingest(id){
   const owner=await status(id);await lock('source-'+hash(owner.url),async()=>{const job=await status(id);job.mode='record';if(job.status==='converted')job.status='queued';await persist(job);});
   return run(id);
@@ -195,7 +197,28 @@ export async function openIngestion(config,ports={}){
   checks.maintenance=config.maintenance?.project&&config.runtimeRoot?'configured':'not_configured';
   return {status:checks.wiki==='ready'&&checks.media==='ready'?'ready':'partial',checks};
  }
- async function workOnce(){const jobs=(await list()).filter(j=>['queued','processing','publishing'].includes(j.status)||j.status==='converted'&&j.mode==='record');const results=[];for(const job of jobs){try{results.push(await run(job.id));}catch(error){if(!/Task queue already running/u.test(error.message))throw error;}}return results;}
+ async function workOnce(){
+  const jobs=(await list()).filter(j=>['queued','processing','publishing'].includes(j.status)||j.status==='converted'&&j.mode==='record');const results=[];
+  for(const job of jobs){try{results.push(await run(job.id));}catch(error){if(!/Task queue already running/u.test(error.message))throw error;}}
+  if(config.maintenance?.project&&config.configPath){
+   await privateDirectory(join(root,'maintenance'));
+   for(const name of (await readdir(join(root,'maintenance'))).filter(n=>/^[a-f0-9]{64}\.json$/u.test(n))){
+    let launch=false;const id=name.slice(0,-5);
+    await updateMaintenance(config,id,async r=>{
+     for(const task of r.tasks){const job=valid(task)?await optionalJSON(pathFor(task)):null;if(job&&['complete','converted'].includes(job.status))r.resolvedTasks=[...new Set([...(r.resolvedTasks??[]),task])];}
+     if(r.tasks.length&&r.tasks.every(t=>(r.resolvedTasks??[]).includes(t))){if(!['starting','running'].includes(r.status))r.status='source_recovered';return r;}
+     if(['starting','running'].includes(r.status)&&r.workerPid){try{process.kill(r.workerPid,0);}catch(error){if(error.code==='ESRCH'){r.status='waiting_session_result';r.reason='Maintenance worker exited; reconcile the existing session before recovery';}}}
+     const unresolved=['verified','source_recovered'].includes(r.status)&&r.activated&&r.tasks.some(t=>!(r.replayedTasks??[]).includes(t)&&!(r.resolvedTasks??[]).includes(t));
+     if((['waiting_bridge','waiting_workspace','queued'].includes(r.status)||unresolved)&&(r.nextAttemptAt??0)<=Date.now()){
+      if(!r.activated)r.status='queued';r.nextAttemptAt=Date.now()+60000;launch=true;
+     }
+     return r;
+    });
+    if(launch&&!await (ports.dispatchMaintenance??(id=>startMaintenance(config,id)))(id))await updateMaintenance(config,id,r=>({...r,status:'waiting_bridge'}));
+   }
+  }
+  return results;
+ }
  async function maintain(id){const job=await status(id);if(!job.maintenance)throw Error('Task has no code maintenance request');return repairIngestion(config,job.maintenance.id);}
  return {submit,submitMany,run,status,list,supplement,retry,ingest,workOnce,maintain,doctor};
 }

@@ -8,6 +8,7 @@ import {promisify} from 'node:util';
 const exec=promisify(execFile);
 const cli=new URL('../scripts/wiki.mjs',import.meta.url).pathname;
 import {openIngestion} from '../src/ingestion.js';
+import {updateMaintenance} from '../src/ingestion-maintenance.js';
 
 test('AI can convert text, inspect its durable task and reuse it without touching a Wiki',async()=>{
  const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-cli-')));
@@ -23,6 +24,18 @@ test('AI can convert text, inspect its durable task and reuse it without touchin
   await assert.rejects(readFile(join(root,'vault/wiki/index.md')),{code:'ENOENT'});
   await call(['submit','--text','第一份资料','--request-id','stable-call']);
   await assert.rejects(call(['submit','--text','另一份资料','--request-id','stable-call']),/conflict/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('worker reschedules checkout-waiting maintenance and late members of verified repairs with backoff',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-maint-queue-')));
+ try{
+  const config={stateDir:join(root,'state'),python:'/usr/bin/python3',configPath:join(root,'config.json'),maintenance:{project:join(root,'development')}};
+  const started=[],service=await openIngestion(config,{dispatchMaintenance:async id=>{started.push(id);return true;}}),id='d'.repeat(64);
+  await updateMaintenance(config,id,()=>({id,status:'waiting_workspace',tasks:['1'.repeat(64)],nextAttemptAt:0}));
+  await service.workOnce();assert.deepEqual(started,[id]);await service.workOnce();assert.equal(started.length,1);
+  await updateMaintenance(config,id,r=>({...r,status:'verified',activated:true,tasks:['late-task'],replayedTasks:[],nextAttemptAt:0}));
+  await service.workOnce();assert.deepEqual(started,[id,id]);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

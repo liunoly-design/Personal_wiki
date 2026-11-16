@@ -19,10 +19,11 @@ const help=`Personal Wiki — durable AI ingestion
 Submission and conversion are not proof of Wiki publication. Inspect task status.
 `;
 try{
- const {values,positionals}=parseArgs({allowPositionals:true,options:{config:{type:'string'},text:{type:'string'},mode:{type:'string'},file:{type:'string'},name:{type:'string'},background:{type:'string'},refresh:{type:'boolean'},'request-id':{type:'string'},watch:{type:'boolean'},help:{type:'boolean'}}});
+ const {values,positionals}=parseArgs({allowPositionals:true,options:{config:{type:'string'},text:{type:'string'},mode:{type:'string'},file:{type:'string'},name:{type:'string'},background:{type:'string'},refresh:{type:'boolean'},'request-id':{type:'string'},'maintenance-replay':{type:'string'},watch:{type:'boolean'},help:{type:'boolean'}}});
  if(values.help||!positionals.length){console.log(help);process.exit(0);}
  const configPath=resolve(values.config??process.env.WIKI_CONFIG??join(homedir(),'.config/personal-wiki/ingest.json'));
  const config={...JSON.parse(await readFile(configPath,'utf8')),configPath};
+ try{config.processorVersion=JSON.parse(await readFile(resolve(import.meta.dirname,'../.release.json'),'utf8')).version;}catch(error){if(error.code!=='ENOENT')throw error;}
  const service=await openIngestion(config);const [command,id]=positionals;
  let result;
  if(command==='submit'||command==='convert'){
@@ -38,7 +39,7 @@ try{
  else if(command==='status')result=await service.status(id);
  else if(command==='pending')result=(await service.list()).filter(j=>!['complete','converted'].includes(j.status));
  else if(command==='supplement'){if(!values.file)throw Error('--file required');result=await service.supplement(id,{file:resolve(values.file)});}
- else if(command==='retry')result=await service.retry(id);
+ else if(command==='retry')result=await service.retry(id,{maintenanceId:values['maintenance-replay']});
  else if(command==='ingest')result=await service.ingest(id);
  else if(command==='maintain')result=await service.maintain(id);
  else if(command==='doctor')result=await service.doctor();
