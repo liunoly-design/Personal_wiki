@@ -68,7 +68,7 @@ test('rejected reading structure is explained on retry while original bytes rema
   const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);
   const original='# Checklist\n\n- Keep every item.';await writeFile(join(snapshot,'article.md'),original);let calls=0;
   const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,
-   translate:async({feedback})=>{calls++;return feedback?'# 核对清单\n\n- 保留每一项。':'# 核对清单\n\n保留每一项。';},
+   translate:async({text,feedback})=>{calls++;const translated=text.replace('Checklist','核对清单').replace('Keep every item.','保留每一项。');return feedback?translated:translated+'\n- extra';},
    generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/checklist.md---\n# 清单\n摘要。\n---END FILE---'
   });
   const first=await adapters.importAndCompile({capture:{directory:snapshot},slug:'checklist',url:'https://example.org/checklist'});assert.equal(first.reading.status,'pending');
@@ -83,10 +83,19 @@ test('reading rejection state cannot follow a directory symlink into an original
   const original='# Checklist\n\n- Keep every item.',attachment='{"original":"ATTACHMENT"}';
   const key=createHash('sha256').update('gpt-5.6-terra:v1:'+original).digest('hex');
   await writeFile(join(snapshot,'article.md'),original);await writeFile(join(snapshot,key+'.json'),attachment);
-  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async()=> '# 核对清单\n\n保留每一项。',generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/checklist.md---\n# 清单\n摘要。\n---END FILE---'});
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async({text})=> text+'\n- extra',generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/checklist.md---\n# 清单\n摘要。\n---END FILE---'});
   const first=await adapters.importAndCompile({capture:{directory:snapshot},slug:'checklist',url:'https://example.org/checklist'});assert.equal(first.reading.status,'pending');
   const rejected=join(vault,'.personal-wiki/readings',first.sourceId,'rejected');await rm(rejected,{recursive:true,force:true});await symlink(first.archive,rejected,'dir');
   await assert.rejects(adapters.retryReading(first.sourceId));assert.equal(await readFile(join(first.archive,key+'.json'),'utf8'),attachment);assert.equal(await readFile(join(first.archive,'article.md'),'utf8'),original);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('numeric Markdown prefixes in OCR prose survive natural-language translation verbatim',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'wiki-reading-number-'));
+ try{
+  const vault=join(root,'vault'),snapshot=join(root,'snapshot');await mkdir(vault);await mkdir(snapshot);const original='2024. Large language models improved.';await writeFile(join(snapshot,'article.md'),original);
+  const adapters=createAdapters({vault,python:'python3',captureDirectory:root,flash:{},reading:true,translate:async({text})=>text.replace('2024.','2024年').replace('Large language models improved.','大语言模型取得了进步。'),generate:async({stage})=>stage==='analysis'?'分析':'---FILE: wiki/sources/ocr-year.md---\n# 年份\n摘要。\n---END FILE---'});
+  const result=await adapters.importAndCompile({capture:{directory:snapshot},slug:'ocr-year',url:'https://example.org/year'});assert.equal(result.reading.status,'complete');assert.match(await readFile(result.reading.path,'utf8'),/2024\. 大语言模型取得了进步/);assert.equal(await readFile(join(result.archive,'article.md'),'utf8'),original);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
