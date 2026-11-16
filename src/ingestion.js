@@ -69,7 +69,7 @@ export async function openIngestion(config,ports={}){
   const directory=join(root,'work',job.id,'snapshots',String(job.generation??0));const markdown=join(directory,'article.md');
   const hashes={};
   let preparedReadingModel,canonicalUrl=job.canonicalUrl??job.url;
-  if(job.supplementFile||job.platform==='text'){
+  if(job.supplementFile||job.platform==='text'&&!job.mediaFile){
    const text=job.supplementFile?await readFile(job.supplementFile,'utf8'):identifyInput(job.input).text;
    await exclusive(markdown,text);hashes['article.md']=hash(text);
    if(job.supplementFile){const note=JSON.stringify({kind:'user-provided',url:canonicalUrl,requestedUrl:job.url,supplements:job.supplements},null,2);await exclusive(join(directory,'supplement.json'),note);hashes['supplement.json']=hash(note);}

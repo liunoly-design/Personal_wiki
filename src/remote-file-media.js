@@ -45,7 +45,8 @@ export async function captureLocalMedia({job,config,directory,signal}){
  const refs=Object.entries(result.manifest.media).map(([kind,m])=>`[${kind==='audio'?'完整音频':'原始媒体'}](${result.mediaBase}${m.path})`).join(' · ');
  const chinese=result.markdown.split('## 完整中文正文\n\n')[1]?.split('\n\n## 完整原始转写')[0];if(!chinese)throw Error('Chinese transcript section missing');
  await saveMediaResult(join(directory,'transcript.md'),result);
- const article=`# ${f.title.replace(/[\r\n]/gu,' ')}\n\n> 完整中文机器转写或译文；未经人工校订。\n\n来源：${canonical}\n\n## 完整中文正文\n\n${chinese}\n\n[独立原始转写与来源资料](transcript.md)\n\n## 媒体与来源核对\n\n${refs}\n\n${job.mediaSupplement?'用户提供的音视频补料；原平台获取未核实。关联来源：'+canonical:'本地文件：'+f.title}。输入 SHA-256：${f.sha256}\n`;
+ const originalText=job.mediaSupplement&&job.platform==='text'?(job.input.text??job.input.input):null;
+ const article=`# ${f.title.replace(/[\r\n]/gu,' ')}\n\n> 完整中文机器转写或译文；未经人工校订。\n\n来源：${canonical}\n\n${originalText?'## 原始文字说明\n\n'+originalText+'\n\n':''}## 完整中文正文\n\n${chinese}\n\n[独立原始转写与来源资料](transcript.md)\n\n## 媒体与来源核对\n\n${refs}\n\n${job.mediaSupplement?'用户提供的音视频补料；原平台获取未核实。关联来源：'+canonical:'本地文件：'+f.title}。输入 SHA-256：${f.sha256}\n`;
  await saveMediaResult(join(directory,'article.md'),{markdown:article,manifest:result.manifest});
- return {directory,status:'complete',url:canonical,remoteJobId:result.remoteJobId,preparedReadingModel:result.manifest.translation?.model??`whisper.cpp ${result.manifest.transcription.model}`};
+ return {directory,status:'complete',url:canonical,remoteJobId:result.remoteJobId,...(originalText?{}:{preparedReadingModel:result.manifest.translation?.model??`whisper.cpp ${result.manifest.transcription.model}`})};
 }
