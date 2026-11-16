@@ -19,3 +19,10 @@ test('portable imports reject replacement without refresh and unsafe paths befor
   const {writePortable}=await import('../src/portable-bundle.js');await assert.rejects(writePortable({directory:root,hashes:{'../outside':'a'.repeat(64)}},join(root,'bad')),/Unsafe/);assert.deepEqual((await readdir(root)).filter(n=>n==='outside'),[]);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('Wiki-only diagnostics do not require a media service',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'wiki-bridge-doctor-')));
+ try{
+  const s=await openIngestion({stateDir:join(root,'state'),vault:join(root,'vault'),python:'/usr/bin/python3'},{api:{assertPublisherReady:async()=>{},read:async()=>'# Wiki index'}});
+  const result=await s.doctor({media:false});assert.equal(result.status,'ready');assert.equal(result.checks.wiki,'ready');assert.equal(result.checks.media,'not_required');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

@@ -1,4 +1,4 @@
-# 0.9.0 独立发行验收
+# 0.9.1 独立发行验收（含0.9.0安装验证）
 
 日期：2026-11-16。任务 [#51](https://github.com/liunoly-design/Personal_wiki/issues/51)，规格 `docs/specs/dots-independent-distribution.md`。
 
@@ -15,9 +15,9 @@
 
 ## 自动检查
 
-候选阶段：Node169通过；Python91通过、3项环境依赖跳过；独立发行安装测试10项通过。覆盖无开发目录安装、文字转换、配置0600与重放保留、配置修改、skill实际路径/契约、卸载保留状态、上游应用哈希与拒绝覆盖、来源包跨实例入库、哈希篡改拒绝及同URL内容变化需显式refresh。
+候选阶段：Node170通过；Python91通过、3项环境依赖跳过；独立发行安装测试10项通过。覆盖无开发目录安装、文字转换、配置0600与重放保留、配置修改、skill实际路径/契约、卸载保留状态、上游应用哈希与拒绝覆盖、来源包跨实例入库、哈希篡改拒绝及同URL内容变化需显式refresh。
 
-[双轴复审](independent-distribution-code-review-2026-11-16.md)阻塞问题已全部修复并复审通过。最终发行和下载校验在发布后补充。Release由 tag 的干净源码构建，source_dirty必须false；候选包带source_dirty=true，仅用于本次隔离试验，不发布为正式包。
+[双轴复审](independent-distribution-code-review-2026-11-16.md)阻塞问题已全部修复并复审通过。0.9.0 已由 GitHub Actions 成功构建并发布，16项自有资产下载、4包及内部文件哈希验证通过；下载包升级保留私有配置，既有 Wiki 任务仍 complete。读回时修复桥接器 doctor 不应要求 Mini 的诊断问题，0.9.1补丁通过回归，最终补丁下载校验在发布后补充。Release由 tag 的干净源码构建，source_dirty必须false；候选包带source_dirty=true，仅用于本次隔离试验，不发布为正式包。
 
 ## 交付范围与限制
 

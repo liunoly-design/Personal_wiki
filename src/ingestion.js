@@ -217,12 +217,13 @@ export async function openIngestion(config,ports={}){
  }
  async function list(){await privateDirectory(join(root,'jobs'));return Promise.all((await readdir(join(root,'jobs'))).filter(n=>/^[a-f0-9]{64}\.json$/u.test(n)).map(n=>status(n.slice(0,-5))));}
  async function submitMany(options){const urls=options.bundleFile===undefined&&options.file===undefined&&options.text===undefined?inputURLs(options.input??''):[];if(urls.length<=1)return [await submit(options)];const jobs=[];for(const url of urls)jobs.push(await submit({...options,input:url,requestId:options.requestId?options.requestId+':'+url:undefined}));return jobs;}
- async function doctor(){
+ async function doctor({media=true}={}){
   const checks={host:hostname(),node:process.versions.node,python:Boolean(config.python),vaultConfigured:isAbsolute(config.vault??'')};
   try{const api=ports.api??await localNashsuAPI(config.vault,{maxAttempts:1});await api.assertPublisherReady?.();await api.read('wiki/index.md');checks.wiki='ready';}catch{checks.wiki='unavailable';}
-  try{const stat=await lstat(config.mediaServiceTokenFile);if(!stat.isFile()||stat.uid!==process.getuid()||(stat.mode&0o077))throw Error('Private credential file required');const token=(await readFile(config.mediaServiceTokenFile,'utf8')).trim();await new MediaServiceClient({baseUrl:config.mediaServiceUrl,token}).health();checks.media='ready';}catch{checks.media='unavailable';}
+  if(!media)checks.media='not_required';
+  else try{const stat=await lstat(config.mediaServiceTokenFile);if(!stat.isFile()||stat.uid!==process.getuid()||(stat.mode&0o077))throw Error('Private credential file required');const token=(await readFile(config.mediaServiceTokenFile,'utf8')).trim();await new MediaServiceClient({baseUrl:config.mediaServiceUrl,token}).health();checks.media='ready';}catch{checks.media='unavailable';}
   checks.maintenance=config.maintenance?.project&&config.runtimeRoot?'configured':'not_configured';
-  return {status:checks.wiki==='ready'&&checks.media==='ready'?'ready':'partial',checks};
+  return {status:checks.wiki==='ready'&&(!media||checks.media==='ready')?'ready':'partial',checks};
  }
  async function workOnce(){
   const jobs=(await list()).filter(j=>['queued','processing','publishing'].includes(j.status)||j.status==='converted'&&j.mode==='record');const results=[];

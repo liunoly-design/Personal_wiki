@@ -5,7 +5,7 @@ try{
  const {values:v,positionals:p}=parseArgs({allowPositionals:true,options:{config:{type:'string'},bundle:{type:'string'},name:{type:'string'},'request-id':{type:'string'},background:{type:'string'},refresh:{type:'boolean'},help:{type:'boolean'}}});
  if(v.help||!p.length){console.log('wiki-bridge doctor | ingest --bundle /absolute/bundle.json [--name english-name] | status TASK_ID | run TASK_ID\n--config /absolute/config.json');process.exit(0);}
  const configPath=resolve(v.config??process.env.WIKI_CONFIG??join(homedir(),'.config/personal-wiki/wiki-bridge.json'));const config={...JSON.parse(await readFile(configPath,'utf8')),configPath},service=await openIngestion(config);let result;
- if(p[0]==='doctor')result=await service.doctor();
+ if(p[0]==='doctor')result=await service.doctor({media:false});
  else if(p[0]==='ingest'){if(!v.bundle)throw Error('--bundle required');const job=await service.submit({bundleFile:resolve(v.bundle),name:v.name,requestId:v['request-id'],background:v.background,mode:'record',refresh:v.refresh});result=await service.run(job.id);}
  else if(p[0]==='status')result=await service.status(p[1]);
  else if(p[0]==='run')result=await service.run(p[1]);
