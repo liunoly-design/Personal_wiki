@@ -82,7 +82,15 @@ export async function buildChineseReading({vault,record,translate,python,signal,
  // Extraction metadata stays in the immutable original, not in translated prose.
  const body=original.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u,'');
  if(preparedModel)return store({operation:'reading',vault,sourceId:record.id,content:body,model:preparedModel},{python,signal});
- for(const unit of units(body,typeof translate.batch!=='function')){
+ const planned=[];
+ for(const group of units(body)){
+  if(group.text!==undefined&&typeof translate.batch==='function'){
+   const key=createHash('sha256').update('gpt-5.6-terra:v1:'+group.text).digest('hex');
+   try{planned.push({literal:await readFile(join(cache,'units',key+'.md'),'utf8')});continue;}catch(error){if(error.code!=='ENOENT')throw error;}
+   planned.push(...units(group.text,false));
+  }else planned.push(group);
+ }
+ for(const unit of planned){
   signal?.throwIfAborted();
   if(unit.literal!==undefined){content.push(unit.literal);continue;}
   if(!needsTranslation(unit.text)){content.push(unit.text);continue;}
