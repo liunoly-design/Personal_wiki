@@ -28,7 +28,7 @@ test('maintenance requires an acknowledged Codex session and independently passi
   const git=['-c','user.name=WikiTest','-c','user.email=wiki@example.invalid'];
   await writeFile(join(project,'processor.txt'),'broken');await exec('git',['add','processor.txt'],{cwd:project});await exec('git',[...git,'commit','-m','fixture'],{cwd:project});
   const binary=join(root,'fake-codex');
-  await writeFile(binary,`#!${process.execPath}\nconst fs=require('node:fs'),cp=require('node:child_process');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,500);fs.writeFileSync('processor.txt','repaired');cp.execFileSync('git',${JSON.stringify([...git,'commit','-am','repair'])});console.log(JSON.stringify({type:'thread.started',thread_id:'fixture-session-1'}));console.log(JSON.stringify({type:'turn.completed'}));\n`);await chmod(binary,0o700);
+  await writeFile(binary,`#!${process.execPath}\nconst fs=require('node:fs');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,500);fs.writeFileSync('processor.txt','repaired');console.log(JSON.stringify({type:'thread.started',thread_id:'fixture-session-1'}));console.log(JSON.stringify({type:'turn.completed'}));\n`);await chmod(binary,0o700);
   const stateDir=join(root,'state'),id='a'.repeat(64),directory=join(stateDir,'ingestion/maintenance');await mkdir(directory,{recursive:true});
   await writeFile(join(directory,id+'.json'),JSON.stringify({id,status:'queued',tasks:[],reason:'synthetic processor failure'}));
   const config={stateDir,runtimeRoot:join(stateDir,'runtime'),python:'/usr/bin/python3',codexBinary:binary,maintenance:{project,testCommands:[[process.execPath,'-e',"require('node:assert/strict').equal(require('node:fs').readFileSync('processor.txt','utf8'),'repaired')"]]}};
