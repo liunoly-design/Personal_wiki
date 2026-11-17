@@ -20,4 +20,10 @@
 
 原LLM Wiki固定官方安装器的实机证据见[独立发行0.9.1](independent-distribution-2026-11-16.md)；本次统一入口的离线重放测试使用已有应用，不冒充新账号登录与新Mac整机验收。媒体服务和真实平台采集沿用既有版本能力，未在本次对另一台用户Mac重新验收。Homebrew安装依赖的完整新Mac流程未在空白机器上执行。
 
-发行下载、隔离安装、实际launchd临时启动/移除结果在发布完成后补录；未验证项不以单元测试代替。
+## 发行下载与实际启动项
+
+- [0.10.0发行](https://github.com/liunoly-design/Personal_wiki/releases/tag/distribution-v0.10.0)，源码c31a79b26bf820fccc456740cf0d0d44cef8352e；[GitHub Actions](https://github.com/liunoly-design/Personal_wiki/actions/runs/44007040100)成功。tag未移动。
+- 21项发行资产已从GitHub实际下载，GitHub digest及SHA256SUMS全部匹配。4个tar包的内部清单、来源提交、source_dirty=false及文件哈希全部核验通过。
+- 从官方已发布0.9.1 CLI包在隔离prefix安装，使用新下载的pwiki-setup.py及0.10.0包实际升级。私有配置逐字一致，合成Vault原件不变；升级后的CLI中文转换达到converted并核对完整正文，新pwiki-update重放返回up_to_date。
+- 使用下载包的更新管理入口临时注册独立label的真实当前用户launchd任务；后台pwiki-update实际输出not_due（已于本次检查，不再次联网），随后正常移除，launchctl确认任务已卸载。本机原生产launcher、worker、配置和正式Vault未改动。
+- 私有下载/测试产物与回执位于项目忽略目录，不随Git或Release发布。上述隔离本机证据不替代其他Mac的首次登录、真实模型入库及平台采集验收。
