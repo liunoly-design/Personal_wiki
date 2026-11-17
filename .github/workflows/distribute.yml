@@ -29,8 +29,12 @@ jobs:
           done
           cp config/examples/*.json dist/
           cp docs/independent-install.md docs/llm-wiki-install.md docs/reviews/independent-distribution-2026-11-16.md docs/reviews/independent-distribution-code-review-2026-11-16.md dist/
+          cp distribution/install-pwiki.sh distribution/pwiki-setup.py dist/
+          cp docs/mac-install.md dist/
           cd dist
-          sha256sum *.tar.gz *.json *.md > SHA256SUMS
+          sha256sum pwiki-setup.py > pwiki-setup.py.sha256
+          sha256sum install-pwiki.sh > install-pwiki.sh.sha256
+          sha256sum *.tar.gz *.json *.md *.py *.sh > SHA256SUMS
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}

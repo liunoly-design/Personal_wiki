@@ -26,7 +26,13 @@ try{
    const old=await readFile(plist,'utf8').catch(e=>{if(e.code!=='ENOENT')throw e;});if(old&&old!==body)throw Error('Another worker owns this launchd label; retained');await atomic(plist,body);let running=false;try{execFileSync('/bin/launchctl',['print','gui/'+process.getuid()+'/'+label],{stdio:'pipe'});running=true;}catch{}if(!running)execFileSync('/bin/launchctl',['bootstrap','gui/'+process.getuid(),plist],{stdio:'pipe'});
   }else{
    const old=await readFile(plist,'utf8').catch(e=>{if(e.code!=='ENOENT')throw e;});if(old){if(!old.includes(bin))throw Error('Another worker owns this launchd label; retained');try{execFileSync('/bin/launchctl',['bootout','gui/'+process.getuid(),plist],{stdio:'pipe'});}catch{}await unlink(plist);}
-   if(p[0]==='uninstall'){const text=await readFile(bin,'utf8').catch(e=>{if(e.code!=='ENOENT')throw e;});if(text){if(!text.includes(quote(configPath))||!text.includes(quote(join(runtime,'scripts',name==='personal-wiki'?'wiki.mjs':'wiki-bridge.mjs'))))throw Error('Launcher edited; retained');await unlink(bin);}}
+   if(p[0]==='uninstall'){
+    if(owner.component==='cli'){
+     const updater=join(prefix,'bin/pwiki-update'),text=await readFile(updater,'utf8').catch(e=>{if(e.code!=='ENOENT')throw e;});
+     if(text){if(!text.includes(quote(join(runtime,'distribution/pwiki-setup.py')))||!text.includes(quote(prefix)))throw Error('Updater launcher edited; retained');execFileSync(config.python,[join(runtime,'distribution/pwiki-setup.py'),'schedule','--prefix',prefix,'--remove'],{stdio:'pipe'});await unlink(updater);}
+    }
+    const text=await readFile(bin,'utf8').catch(e=>{if(e.code!=='ENOENT')throw e;});if(text){if(!text.includes(quote(configPath))||!text.includes(quote(join(runtime,'scripts',name==='personal-wiki'?'wiki.mjs':'wiki-bridge.mjs'))))throw Error('Launcher edited; retained');await unlink(bin);}
+   }
   }
  }else throw Error('Unknown lifecycle command');
  console.log(JSON.stringify({status:'ok',action:p[0],prefix,config:configPath}));

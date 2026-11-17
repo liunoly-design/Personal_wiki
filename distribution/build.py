@@ -7,7 +7,7 @@ COMPONENTS=('cli','wiki-bridge','mini-media','llm-wiki-setup')
 def inventory(component):
  if component=='mini-media':return ['services/mini-media'],['distribution/install-mini.py','distribution/native-whisper.py','upstream-nashsu.json']
  if component=='llm-wiki-setup':return ['config/examples'],['distribution/llm-wiki-setup.py','upstream-nashsu.json']
- return ['src','vendor/nashsu','config/examples'],['services/mini-media/transcript-identifiers.json','package.json','requirements-capture.txt','upstream-nashsu.json','.agents/skills/personal-wiki/SKILL.md','docs/contracts/ingestion-cli.md']
+ return ['src','vendor/nashsu','config/examples'],['services/mini-media/transcript-identifiers.json','package.json','requirements-capture.txt','upstream-nashsu.json','.agents/skills/personal-wiki/SKILL.md','docs/contracts/ingestion-cli.md','distribution/pwiki-setup.py']
 
 def build(component,version,output,allow_dirty=False):
  if component not in COMPONENTS:raise ValueError('Invalid component')

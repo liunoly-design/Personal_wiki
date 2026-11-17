@@ -1,5 +1,7 @@
 # 个人 Wiki / Personal Wiki
 
+其他 Mac 安装入口：[下载、依赖、Mini配置和每日自动更新](docs/mac-install.md)。每台 Mac 使用本地 Pwiki/LLM Wiki/Vault，Mini 仅提供媒体下载与转录；0.10.0统一安装入口不要求开发 checkout。
+
 2026-11-16 新任务：用户确认先验收 dots 实际调用，再独立发行 CLI、Mini 完整服务、Wiki 接入及 LLM Wiki 安装配置。dots 文字与公开媒体入口已由用户真实发起并复核通过，独立安装包已发布 [0.9.1](https://github.com/liunoly-design/Personal_wiki/releases/tag/distribution-v0.9.1)，下载校验、隔离安装升级及实际入库通过；见 [规格与验收指令](docs/specs/dots-independent-distribution.md)、[配置样例](config/examples/README.md) 、[独立安装说明](docs/independent-install.md)、[LLM Wiki 安装配置](docs/llm-wiki-install.md) 和 [任务 #51](https://github.com/liunoly-design/Personal_wiki/issues/51)。
 
 CLI 管理 App 集成请读 [开发交接文档](docs/handoffs/cli-manager-integration.md)，其中列明0.9.1已实现接口、App侧建议和待扩展能力。

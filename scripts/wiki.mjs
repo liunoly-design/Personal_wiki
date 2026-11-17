@@ -7,6 +7,7 @@ import {parseArgs} from 'node:util';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
 import {openIngestion} from '../src/ingestion.js';
+import {runtimeLease} from '../src/runtime-lease.js';
 
 const help=`Personal Wiki — durable AI ingestion
   wiki submit [share text or URL] [--text TEXT | --file FILE] [--mode record|convert]
@@ -19,11 +20,13 @@ const help=`Personal Wiki — durable AI ingestion
   --config /absolute/private/config.json
 Submission and conversion are not proof of Wiki publication. Inspect task status.
 `;
+let releaseRuntime=async()=>{};
 try{
  const {values,positionals}=parseArgs({allowPositionals:true,options:{config:{type:'string'},text:{type:'string'},mode:{type:'string'},file:{type:'string'},bundle:{type:'string'},output:{type:'string'},name:{type:'string'},background:{type:'string'},refresh:{type:'boolean'},'request-id':{type:'string'},'maintenance-replay':{type:'string'},watch:{type:'boolean'},help:{type:'boolean'}}});
  if(values.help||!positionals.length){console.log(help);process.exit(0);}
  const configPath=resolve(values.config??process.env.WIKI_CONFIG??join(homedir(),'.config/personal-wiki/ingest.json'));
  const config={...JSON.parse(await readFile(configPath,'utf8')),configPath};
+ if(positionals[0]!=='worker')releaseRuntime=await runtimeLease(config);
  try{config.processorVersion=JSON.parse(await readFile(resolve(import.meta.dirname,'../.release.json'),'utf8')).version;}catch(error){if(error.code!=='ENOENT')throw error;}
  const service=await openIngestion(config);const [command,id]=positionals;
  let result;
@@ -45,7 +48,8 @@ try{
  else if(command==='ingest')result=await service.ingest(id);
  else if(command==='maintain')result=await service.maintain(id);
  else if(command==='doctor')result=await service.doctor();
- else if(command==='worker'){do{result=await service.workOnce();if(values.watch){if(config.runtimeRoot&&await realpath(join(config.runtimeRoot,'current'))!==resolve(import.meta.dirname,'..'))process.exit(0);await delay(2000);}}while(values.watch);}
+ else if(command==='worker'){do{let release=async()=>{};try{release=await runtimeLease(config);result=await service.workOnce();}catch(error){if(error.code==='RUNTIME_CHANGED')break;if(error.code!=='RUNTIME_BUSY')throw error;result={status:'deferred',reason:'runtime_update'};}finally{await release();}if(values.watch){if(config.runtimeRoot&&await realpath(join(config.runtimeRoot,'current'))!==resolve(import.meta.dirname,'..'))break;await delay(2000);}}while(values.watch);}
  else throw Error('Unknown command; use --help');
  console.log(JSON.stringify(result));
 }catch(error){console.error(JSON.stringify({status:'error',message:error.message}));process.exitCode=1;}
+finally{await releaseRuntime();}
