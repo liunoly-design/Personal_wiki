@@ -33,7 +33,7 @@ def build(component,version,output,allow_dirty=False):
   elif component=='mini-media':shutil.copyfile(ROOT/'distribution/install-mini.py',stage/'install.py')
   else:
    shutil.copyfile(ROOT/'distribution/llm-wiki-setup.py',stage/'llm-wiki-setup.py');shutil.copyfile(ROOT/'upstream-nashsu.json',stage/'upstream-nashsu.json')
-  for doc in ['independent-install.md','llm-wiki-install.md']:
+  for doc in ['independent-install.md','llm-wiki-install.md','mac-install.md']:
    shutil.copyfile(ROOT/'docs'/doc,stage/doc)
   manifest={'component':component,'version':version,'revision':revision,'source_dirty':dirty,'files':{p.relative_to(stage).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(stage.rglob('*')) if p.is_file()}}
   (stage/'distribution.json').write_text(json.dumps(manifest,indent=2)+'\n')
