@@ -53,7 +53,7 @@ async def fetch(url,path,headers):
 async def fetch_candidates(urls,path,headers):
     last=None
     for url in urls:
-        try:await fetch(url,path,headers);return
+        try:await fetch(url,path,headers);return url
         except ConfirmationRequired:raise
         except Exception as exc:last=exc
     if isinstance(last,httpx.HTTPStatusError):
@@ -107,7 +107,10 @@ async def process(job,stage,*,source=None,transcriber=None):
     if video.exists():safe_path(str(video.relative_to(DATA)))
     if not video.exists():
         if info.expected_bytes>1024**3:raise ConfirmationRequired('Video exceeds 1GB')
-        await fetch_candidates(info.video_urls,video,source.headers());selection.update(sha256=digest(video),downloaded_id=info.media_id,detail_id=detail_id);dump(selection_path,selection)
+        downloaded_url=await fetch_candidates(info.video_urls,video,source.headers())
+        selected=next((variant for variant in selection.get('variants',[]) if downloaded_url in variant['address']['url_list']),None)
+        if selected:selection.update({key:selected[key] for key in ('gear','bit_rate','address')})
+        selection.update(sha256=digest(video),downloaded_id=info.media_id,detail_id=detail_id);dump(selection_path,selection)
     elif selection_path.exists():
         selection=json.loads(selection_path.read_text())
         if selection.get('sha256') != digest(video):raise VerificationError('Stored video integrity mismatch','MEDIA_INVALID')

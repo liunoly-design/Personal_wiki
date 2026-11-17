@@ -2,7 +2,7 @@
 import asyncio
 from datetime import datetime, timezone
 
-from ..safe_network import client, video_id
+from ..safe_network import client, video_id, secure_media_url
 from .contracts import ConfirmationRequired, LoginRequired, SourceMedia
 from ..verification import VerificationError
 
@@ -52,17 +52,42 @@ class F2Source:
                 candidates.append((min(width, height), candidate.get("bit_rate", 0), candidate))
         if not candidates:
             raise RuntimeError("No verified video candidate at or below resolution policy")
-        selected = max(candidates, key=lambda value: value[:2])[2]
+        ordered = sorted(candidates, key=lambda value: value[:2], reverse=True)
+        variants = []
+        for _, _, candidate in ordered:
+            addresses = []
+            for url in candidate["play_addr"]["url_list"]:
+                try:
+                    addresses.append(secure_media_url(url))
+                except ValueError:
+                    continue
+            if addresses:
+                variants.append({"gear": candidate.get("gear_name"),
+                                 "bit_rate": candidate.get("bit_rate"),
+                                 "address": {**candidate["play_addr"],
+                                             "url_list": list(dict.fromkeys(addresses))}})
+        if not variants:
+            raise ValueError("No allowed media candidate")
+        video_urls = tuple(dict.fromkeys(
+            url for variant in variants for url in variant["address"]["url_list"]
+        ))
         description = item.get("desc", "")
+        cover_urls = []
+        for url in (video.get("origin_cover") or video["cover"])["url_list"]:
+            try:
+                cover_urls.append(secure_media_url(url))
+            except ValueError:
+                continue
+        if not cover_urls:
+            raise ValueError("No allowed cover candidate")
         return SourceMedia(
             media_id=media_id, title=item.get("item_title") or item.get("preview_title") or description.split("\n")[0],
             description=description, author=item["author"]["nickname"],
             published_at=datetime.fromtimestamp(item["create_time"], timezone.utc).isoformat(),
             duration_seconds=video["duration"] / 1000,
             canonical_url=f"https://www.douyin.com/video/{media_id}",
-            video_urls=tuple(selected["play_addr"]["url_list"]),
-            cover_urls=tuple((video.get("origin_cover") or video["cover"])["url_list"]),
-            selection={"gear": selected.get("gear_name"), "bit_rate": selected.get("bit_rate"),
-                       "address": selected["play_addr"]},
-            expected_bytes=selected["play_addr"].get("data_size", 0), raw_metadata=raw,
+            video_urls=video_urls,
+            cover_urls=tuple(dict.fromkeys(cover_urls)),
+            selection={**variants[0], "variants": variants},
+            expected_bytes=variants[0]["address"].get("data_size", 0), raw_metadata=raw,
         )

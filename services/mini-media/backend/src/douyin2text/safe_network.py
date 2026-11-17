@@ -22,6 +22,16 @@ def validate_url(url, media=False):
         raise ValueError('Disallowed platform destination')
     return u
 
+def secure_media_url(url):
+    """Use HTTPS for an allowlisted CDN URL supplied by platform metadata."""
+    u = urlsplit(str(url))
+    if u.scheme == 'http':
+        if u.username or u.password or u.port not in (None, 80):
+            raise ValueError('Disallowed platform destination')
+        url = u._replace(scheme='https', netloc=u.hostname or '').geturl()
+    validate_url(url, media=True)
+    return str(url)
+
 class PublicBackend(AnyIOBackend):
     async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
         if port != 443:
