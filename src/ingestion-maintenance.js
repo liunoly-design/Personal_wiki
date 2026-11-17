@@ -6,6 +6,7 @@ import {saveJSON,optionalJSON} from './durable-files.js';
 import {acquireQueueLease} from './task-queue.js';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
+import {codexEnvironment} from './codex.js';
 const exec=promisify(execFile);
 
 async function workspaceState(project){
@@ -100,7 +101,7 @@ export async function repairIngestion(config,id){
   const args=['-a','never','exec','--sandbox','workspace-write','--json','--output-last-message',output,...(config.compilerModel?['--model',config.compilerModel]:[]),'-'];
   let pending='',writes=Promise.resolve(),sessionId;
   const code=await new Promise((accept,reject)=>{
-   const child=spawn(config.codexBinary??'codex',args,{cwd:project,timeout:config.maintenance?.timeoutMs??1800000,stdio:['pipe','pipe','pipe']});
+   const child=spawn(config.codexBinary??'codex',args,{cwd:project,timeout:config.maintenance?.timeoutMs??1800000,env:codexEnvironment(),stdio:['pipe','pipe','pipe']});
    child.on('error',reject);child.stdin.on('error',reject);
    child.stdout.on('data',chunk=>{
     pending+=chunk.toString();const lines=pending.split('\n');pending=lines.pop();

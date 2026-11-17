@@ -20,9 +20,11 @@ async function immutable(path,bytes){
 async function journal(path,value){await regularParents(dirname(path));const stat=await lstat(path).catch(e=>{if(e.code!=='ENOENT')throw e;});if(stat&&!stat.isFile())throw Error('Regular activation journal required');const part=path+'.'+randomUUID();await writeFile(part,JSON.stringify(value)+'\n',{flag:'wx',mode:0o600});await rename(part,path);}
 let releaseRuntime=async()=>{};
 try{
- const {values:v}=parseArgs({options:{prefix:{type:'string'},config:{type:'string'},python:{type:'string'},vault:{type:'string'},codex:{type:'string'},'media-url':{type:'string'},'media-token-file':{type:'string'},'idle-only':{type:'boolean'},help:{type:'boolean'}}});
+ const {values:v}=parseArgs({options:{prefix:{type:'string'},config:{type:'string'},python:{type:'string'},node:{type:'string'},vault:{type:'string'},codex:{type:'string'},'media-url':{type:'string'},'media-token-file':{type:'string'},'idle-only':{type:'boolean'},help:{type:'boolean'}}});
  if(v.help){console.log('node install.mjs [--prefix ABS_DIR] [--config ABS_FILE] [--python ABS_PYTHON] [--vault ABS_VAULT] [--codex ABS_CODEX] [--media-url ORIGIN] [--media-token-file ABS_FILE]');process.exit(0);}
  if(Number(process.versions.node.split('.')[0])<24)throw Error('Node 24+ required');
+ const node=v.node??process.execPath;if(!isAbsolute(node))throw Error('Absolute Node executable required');
+ execFileSync(node,['-e','if(Number(process.versions.node.split(".")[0])<24)process.exit(1)'],{stdio:'pipe'});
  const source=dirname(fileURLToPath(import.meta.url)),manifest=JSON.parse(await readFile(join(source,'distribution.json'),'utf8'));
  if(!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/u.test(manifest.version)||!['cli','wiki-bridge'].includes(manifest.component)||!/^[a-f0-9]{40}$/u.test(manifest.revision))throw Error('Invalid distribution manifest');
  for(const [path,sha] of Object.entries(manifest.files)){
@@ -42,6 +44,17 @@ try{
  const old=await readFile(configPath,'utf8').then(JSON.parse).catch(e=>{if(e.code!=='ENOENT')throw e;return null;});
  if(configStat&&(configStat.mode&0o077||configStat.uid!==process.getuid()))throw Error('Private owned config required');
  if(old&&resolve(old.stateDir)!==stateDir)throw Error('Existing config belongs to another installation');
+ const currentLink=join(runtimeRoot,'current'),currentStat=await lstat(currentLink).catch(e=>{if(e.code!=='ENOENT')throw e;});
+ if(currentStat){
+  if(!currentStat.isSymbolicLink())throw Error('Managed current link required');
+  const active=JSON.parse(await readFile(join(currentLink,'.distribution.json'),'utf8'));
+  const parts=value=>value.match(/^\d+\.\d+\.\d+/u)?.[0].split('.').map(Number);
+  const incoming=parts(manifest.version),present=parts(active.version);
+  if(!incoming||!present)throw Error('Unknown installed version; retained');
+  const difference=incoming.map((value,index)=>value-present[index]).find(value=>value!==0)??0;
+  if(difference<0)throw Error('Newer runtime already active; downgrade refused');
+  if(difference===0&&JSON.stringify(active.files)!==JSON.stringify(manifest.files))throw Error('Installed version has different bytes; retained');
+ }
  if(v['idle-only']&&old){
   let busy=Boolean(old.maintenance?.project);
   for(const name of await readdir(join(stateDir,'ingestion/jobs')).catch(e=>{if(e.code==='ENOENT')return [];throw e;})){
@@ -51,7 +64,7 @@ try{
   }
   if(busy){console.log(JSON.stringify({status:'deferred',reason:'pending_tasks_or_code_maintenance'}));await releaseRuntime();process.exit(0);}
  }
- const config={stateDir,runtimeRoot,python,autoStart:false,...(v.vault?{vault:resolve(v.vault)}:{}),...(v.codex?{codexBinary:resolve(v.codex)}:{}),...(v['media-url']?{mediaServiceUrl:v['media-url']}:{}),...(v['media-token-file']?{mediaServiceTokenFile:resolve(v['media-token-file'])}:{})};
+ const config={stateDir,runtimeRoot,python,nodeBinary:node,autoStart:false,...(v.vault?{vault:resolve(v.vault)}:{}),...(v.codex?{codexBinary:resolve(v.codex)}:{}),...(v['media-url']?{mediaServiceUrl:v['media-url']}:{}),...(v['media-token-file']?{mediaServiceTokenFile:resolve(v['media-token-file'])}:{})};
  await privateDirectory(join(runtimeRoot,'releases'));
  const releaseStat=await lstat(release).catch(e=>{if(e.code!=='ENOENT')throw e;});if(releaseStat&&(!releaseStat.isDirectory()||releaseStat.isSymbolicLink()))throw Error('Regular release directory required');
  const installed=await readFile(join(release,'.distribution.json'),'utf8').then(JSON.parse).catch(e=>{if(e.code!=='ENOENT')throw e;return null;});
@@ -63,10 +76,10 @@ try{
  if(!old)await immutable(configPath,JSON.stringify(config,null,2)+'\n');
  await immutable(join(prefix,'.installation.json'),JSON.stringify({component:manifest.component,prefix,config:configPath})+'\n');
  const name=manifest.component==='wiki-bridge'?'wiki-bridge':'personal-wiki',entry=manifest.component==='wiki-bridge'?'wiki-bridge.mjs':'wiki.mjs';
- const bin=join(prefix,'bin',name);await immutable(bin,`#!/bin/sh\nexport WIKI_CONFIG=${quote(configPath)}\nexec ${quote(process.execPath)} ${quote(join(runtimeRoot,'current/scripts',entry))} "$@"\n`);await chmod(bin,0o700);
+ const bin=join(prefix,'bin',name);await immutable(bin,`#!/bin/sh\nexport WIKI_CONFIG=${quote(configPath)}\nexec ${quote(node)} ${quote(join(runtimeRoot,'current/scripts',entry))} "$@"\n`);await chmod(bin,0o700);
  if(manifest.component==='cli'){
   const updater=join(prefix,'bin/pwiki-update');
-  await immutable(updater,`#!/bin/sh\nexec ${quote(old?.python??python)} ${quote(join(runtimeRoot,'current/distribution/pwiki-setup.py'))} update --prefix ${quote(prefix)} --node ${quote(process.execPath)} "$@"\n`);await chmod(updater,0o700);
+  await immutable(updater,`#!/bin/sh\nexec ${quote(old?.python??python)} ${quote(join(runtimeRoot,'current/distribution/pwiki-setup.py'))} update --prefix ${quote(prefix)} --node ${quote(node)} "$@"\n`);await chmod(updater,0o700);
  }
  const current=join(runtimeRoot,'current');const previous=await lstat(current).catch(e=>{if(e.code!=='ENOENT')throw e;});if(previous&&!previous.isSymbolicLink())throw Error('Runtime current must be an installer-managed symlink');
  const oldTarget=previous?await readlink(current):null;

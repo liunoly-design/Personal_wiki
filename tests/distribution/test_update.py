@@ -1,5 +1,5 @@
 """Exercise downloaded packages and the public offline update CLI, without accounts."""
-import fcntl, hashlib, json, os, plistlib, subprocess, sys, tarfile, tempfile, unittest
+import fcntl, hashlib, json, os, plistlib, shutil, subprocess, sys, tarfile, tempfile, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -145,6 +145,40 @@ class UpdateTest(unittest.TestCase):
         journal.write_text(json.dumps({'phase': 'activating', 'previous': str(self.previous), 'next': str(current)}))
         self.assertEqual(self.update(self.old.parent.parent)['status'], 'up_to_date')
         self.assertEqual((self.prefix / 'state/runtime/current').resolve(), self.previous)
+
+    def test_reinstall_cannot_bypass_changed_dependency_requirements(self):
+        new = self.package('0.10.1')
+        (new / 'runtime/requirements-capture.txt').write_text('synthetic-unavailable-dependency==999\n')
+        self.rewrite_archive(new)
+        token = self.root / 'mini-token'
+        token.write_text('synthetic-token')
+        token.chmod(0o600)
+        result = subprocess.run([sys.executable, str(SETUP), 'install', '--prefix', str(self.prefix), '--config', str(self.config), '--release-dir', str(new.parent.parent), '--media-url', 'http://192.0.2.10:8765', '--media-token-file', str(token), '--no-schedule'], text=True, capture_output=True, env=self.env, timeout=45)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('new prefix', json.loads(result.stdout)['message'])
+        self.assertEqual((self.prefix / 'state/runtime/current').resolve(), self.previous)
+
+    def test_stale_installer_cannot_downgrade_a_newer_runtime(self):
+        new = self.package('0.10.1')
+        self.assertEqual(self.update(new.parent.parent)['status'], 'updated')
+        active = (self.prefix / 'state/runtime/current').resolve()
+        stale = subprocess.run(['node', str(self.old / 'install.mjs'), '--prefix', str(self.prefix), '--config', str(self.config), '--python', sys.executable, '--idle-only'], text=True, capture_output=True, env=self.env, timeout=20)
+        self.assertNotEqual(stale.returncode, 0)
+        self.assertIn('downgrade refused', stale.stderr)
+        self.assertEqual((self.prefix / 'state/runtime/current').resolve(), active)
+
+    def test_launcher_retains_selected_stable_node_path(self):
+        stable = self.root / 'stable-node'
+        stable.symlink_to(Path(shutil.which('node')).resolve())
+        prefix = self.root / 'stable-client'
+        config = self.root / 'stable-config.json'
+        self.run_command([str(stable), str(self.old / 'install.mjs'), '--prefix', str(prefix), '--config', str(config), '--python', sys.executable, '--node', str(stable)])
+        self.assertEqual(json.loads(config.read_text())['nodeBinary'], str(stable))
+        self.assertIn(str(stable), (prefix / 'bin/personal-wiki').read_text())
+        self.assertIn(str(stable), (prefix / 'bin/pwiki-update').read_text())
+        result = subprocess.run([str(prefix / 'bin/personal-wiki'), 'convert', '--text', '后台路径测试。'], env={**self.env, 'PATH': '/usr/bin:/bin'}, text=True, capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'], 'converted')
 
 if __name__ == '__main__':
     unittest.main()

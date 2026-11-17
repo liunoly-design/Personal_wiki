@@ -216,11 +216,11 @@ def update(args):
                     result = {'status': 'manual_update_required', 'reason': 'capture_dependencies_or_llm_wiki_pin_changed', 'checkedAt': time.time()}
                     private_json(state, result)
                     return result
-                node = args.node or shutil.which('node')
+                node = args.node or config.get('nodeBinary') or shutil.which('node')
                 if not node:
                     raise ValueError('Node 24+ required; rerun installation bootstrap')
                 smoke(node, candidate, config['python'], work)
-                activated = json.loads(run([node, candidate / 'install.mjs', '--prefix', prefix, '--config', owner['config'], '--python', config['python'], '--idle-only']))
+                activated = json.loads(run([node, candidate / 'install.mjs', '--prefix', prefix, '--config', owner['config'], '--python', config['python'], '--node', node, '--idle-only']))
                 result = {'status': 'updated', 'version': '.'.join(map(str, version)), 'checkedAt': time.time()} if activated['status'] == 'installed' else {'status': 'deferred', 'reason': activated['reason'], 'checkedAt': time.time()}
             private_json(state, result)
             return result
@@ -248,7 +248,10 @@ def schedule(args):
     domain = 'gui/' + str(os.getuid())
     if args.remove:
         if old:
-            subprocess.run(['/bin/launchctl', 'bootout', domain, str(target)], capture_output=True)
+            if subprocess.run(['/bin/launchctl', 'print', domain + '/' + label], capture_output=True).returncode == 0:
+                run(['/bin/launchctl', 'bootout', domain, target])
+                if subprocess.run(['/bin/launchctl', 'print', domain + '/' + label], capture_output=True).returncode == 0:
+                    raise ValueError('Update schedule is still loaded; retained for recovery')
             target.unlink()
         return {'status': 'removed', 'label': label}
     body = {'Label': label, 'ProgramArguments': arguments, 'StartInterval': 3600, 'RunAtLoad': True, 'ProcessType': 'Background', 'StandardOutPath': str(prefix / 'state/update.log'), 'StandardErrorPath': str(prefix / 'state/update-error.log')}
@@ -286,11 +289,15 @@ def install(args):
     node = str(Path(node).absolute())
     os.environ['PATH'] = str(Path(node).parent) + os.pathsep + os.environ.get('PATH', '')
     codex = args.codex or shutil.which('codex')
-    with lease(prefix / '.setup.lock'), tempfile.TemporaryDirectory(prefix='pwiki-setup-') as tmp:
+    with lease(prefix / 'state/update-manager.lock'), tempfile.TemporaryDirectory(prefix='pwiki-setup-') as tmp:
         work = Path(tmp).resolve()
         release, _ = release_metadata(args.release_dir, work)
         candidate = package(release, 'cli', args.release_dir, work)
         existing = installation(prefix)[1] if (prefix / '.installation.json').exists() else None
+        if existing:
+            current = (prefix / 'state/runtime/current').resolve()
+            if any((candidate / 'runtime' / path).read_bytes() != (current / path).read_bytes() for path in ('requirements-capture.txt', 'upstream-nashsu.json')):
+                raise ValueError('Dependencies or LLM Wiki pin changed; install into a new prefix with a separate config, verify it, then switch explicitly')
         python = Path(existing['python'] if existing else sys.executable)
         codex = existing.get('codexBinary') if existing else codex
         if not args.skip_dependencies and not existing:
@@ -308,7 +315,7 @@ def install(args):
                 run([npm, 'install', '--prefix', tools, '@openai/codex'], timeout=900)
                 codex = str(tools / 'node_modules/.bin/codex')
         smoke(node, candidate, python, work)
-        command = [node, candidate / 'install.mjs', '--prefix', prefix, '--config', config_path, '--python', python, '--vault', vault, '--media-url', args.media_url, '--media-token-file', token, '--idle-only']
+        command = [node, candidate / 'install.mjs', '--prefix', prefix, '--config', config_path, '--python', python, '--node', node, '--vault', vault, '--media-url', args.media_url, '--media-token-file', token, '--idle-only']
         if codex:
             command.extend(['--codex', codex])
         result = json.loads(run(command))
